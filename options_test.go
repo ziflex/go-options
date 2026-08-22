@@ -91,11 +91,11 @@ func TestApply(t *testing.T) {
 	})
 }
 
-func TestApplyWithValues(t *testing.T) {
+func TestApplyTo(t *testing.T) {
 	initial := Config{Name: "initial", Timeout: 5}
 
 	t.Run("no options", func(t *testing.T) {
-		cfg, err := ApplyWithValues(initial)
+		cfg, err := ApplyTo(initial)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -105,7 +105,7 @@ func TestApplyWithValues(t *testing.T) {
 	})
 
 	t.Run("override values", func(t *testing.T) {
-		cfg, err := ApplyWithValues(initial, WithName("override"))
+		cfg, err := ApplyTo(initial, WithName("override"))
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -113,4 +113,29 @@ func TestApplyWithValues(t *testing.T) {
 			t.Errorf("expected overridden Name and initial Timeout, got %+v", cfg)
 		}
 	})
+
+	t.Run("invalid option preserves defaults and later options continue", func(t *testing.T) {
+		cfg, err := ApplyTo(initial, WithTimeout(-1), WithName("later"))
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if cfg.Name != "later" || cfg.Timeout != initial.Timeout {
+			t.Errorf("expected later Name and initial Timeout, got %+v", cfg)
+		}
+	})
+}
+
+func TestApplyWithValues(t *testing.T) {
+	initial := Config{Name: "initial", Timeout: 5}
+	options := []Option[Config]{WithName("override"), WithTimeout(-1)}
+
+	want, wantErr := ApplyTo(initial, options...)
+	got, gotErr := ApplyWithValues(initial, options...)
+
+	if got != want {
+		t.Fatalf("ApplyWithValues() = %+v, ApplyTo() = %+v", got, want)
+	}
+	if (gotErr == nil) != (wantErr == nil) || (gotErr != nil && gotErr.Error() != wantErr.Error()) {
+		t.Fatalf("ApplyWithValues() error = %v, ApplyTo() error = %v", gotErr, wantErr)
+	}
 }

@@ -1,0 +1,288 @@
+package options
+
+import (
+	"math"
+	"reflect"
+	"testing"
+)
+
+func validationFailures[V any](value V, validator Validator[V]) []ValidationError {
+	var failures []ValidationError
+	validator(value, func(err ValidationError) {
+		failures = append(failures, err)
+	})
+	return failures
+}
+
+func TestCheck(t *testing.T) {
+	validator := Check(func(value int, report Report) {
+		if value < 1 {
+			report(ValidationError{Reason: "too small"})
+			report(ValidationError{Reason: "not positive"})
+		}
+	})
+
+	failures := validationFailures(0, validator)
+	if len(failures) != 2 {
+		t.Fatalf("failure count = %d, want 2", len(failures))
+	}
+	if failures[0].Reason != "too small" || failures[1].Reason != "not positive" {
+		t.Fatalf("failures = %+v", failures)
+	}
+}
+
+func TestNamed(t *testing.T) {
+	t.Run("adds field to every unnamed failure", func(t *testing.T) {
+		failures := validationFailures(5, Named("workers", Min(10), Max(1)))
+		if len(failures) != 2 {
+			t.Fatalf("failure count = %d, want 2", len(failures))
+		}
+		for _, failure := range failures {
+			if failure.Field != "workers" {
+				t.Errorf("failure field = %q, want workers", failure.Field)
+			}
+		}
+	})
+
+	t.Run("preserves existing field", func(t *testing.T) {
+		validator := Named("outer", Check(func(_ int, report Report) {
+			report(ValidationError{Field: "inner", Reason: "invalid"})
+		}))
+		failures := validationFailures(0, validator)
+		if len(failures) != 1 || failures[0].Field != "inner" {
+			t.Fatalf("failures = %+v, want existing inner field", failures)
+		}
+	})
+
+	t.Run("leaves diagnostics unnamed when field is empty", func(t *testing.T) {
+		failures := validationFailures(0, Named("", Min(1)))
+		if len(failures) != 1 || failures[0].Field != "" {
+			t.Fatalf("failures = %+v, want unnamed failure", failures)
+		}
+	})
+
+	t.Run("ignores nil validators", func(t *testing.T) {
+		failures := validationFailures(0, Named[int]("value", nil, Min(1)))
+		if len(failures) != 1 || failures[0].Field != "value" {
+			t.Fatalf("failures = %+v", failures)
+		}
+	})
+}
+
+func TestNotNil(t *testing.T) {
+	value := 1
+	if failures := validationFailures(&value, NotNil[int]()); len(failures) != 0 {
+		t.Fatalf("non-nil pointer failures = %+v", failures)
+	}
+
+	failures := validationFailures((*int)(nil), NotNil[int]())
+	if len(failures) != 1 {
+		t.Fatalf("nil pointer failure count = %d, want 1", len(failures))
+	}
+	if failures[0] != (ValidationError{Value: "<nil>", Reason: "must not be nil"}) {
+		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestNotZero(t *testing.T) {
+	type count int
+
+	if failures := validationFailures(count(1), NotZero[count]()); len(failures) != 0 {
+		t.Fatalf("non-zero failures = %+v", failures)
+	}
+	failures := validationFailures(count(0), NotZero[count]())
+	if len(failures) != 1 || failures[0].Reason != "must not be zero" {
+		t.Fatalf("zero failures = %+v", failures)
+	}
+
+	value := 1
+	if failures := validationFailures(&value, NotZero[*int]()); len(failures) != 0 {
+		t.Fatalf("non-nil pointer failures = %+v", failures)
+	}
+	if failures := validationFailures((*int)(nil), NotZero[*int]()); len(failures) != 1 {
+		t.Fatalf("nil pointer failure count = %d, want 1", len(failures))
+	}
+}
+
+func TestNotEmpty(t *testing.T) {
+	type name string
+
+	if failures := validationFailures(name("service"), NotEmpty[name]()); len(failures) != 0 {
+		t.Fatalf("non-empty failures = %+v", failures)
+	}
+	failures := validationFailures(name(""), NotEmpty[name]())
+	if len(failures) != 1 {
+		t.Fatalf("empty failure count = %d, want 1", len(failures))
+	}
+	if failures[0].Value != `""` || failures[0].Reason != "must not be empty" {
+		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestMinAndMax(t *testing.T) {
+	type count int
+
+	tests := []struct {
+		name      string
+		value     count
+		validator Validator[count]
+		wantFail  bool
+	}{
+		{name: "min below", value: 1, validator: Min(count(2)), wantFail: true},
+		{name: "min equal", value: 2, validator: Min(count(2))},
+		{name: "min above", value: 3, validator: Min(count(2))},
+		{name: "max below", value: 1, validator: Max(count(2))},
+		{name: "max equal", value: 2, validator: Max(count(2))},
+		{name: "max above", value: 3, validator: Max(count(2)), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	if failures := validationFailures("a", Min("b")); len(failures) != 1 {
+		t.Fatalf("ordered string failure count = %d, want 1", len(failures))
+	}
+	if failures := validationFailures(math.NaN(), Min(0.0)); len(failures) != 0 {
+		t.Fatalf("NaN Min failures = %+v", failures)
+	}
+	if failures := validationFailures(math.NaN(), Max(0.0)); len(failures) != 0 {
+		t.Fatalf("NaN Max failures = %+v", failures)
+	}
+}
+
+func TestStringLengthValidators(t *testing.T) {
+	type name string
+
+	tests := []struct {
+		name      string
+		value     name
+		validator Validator[name]
+		wantFail  bool
+	}{
+		{name: "min below", value: "a", validator: MinLen[name](2), wantFail: true},
+		{name: "min equal", value: "ab", validator: MinLen[name](2)},
+		{name: "min above", value: "abc", validator: MinLen[name](2)},
+		{name: "max below", value: "a", validator: MaxLen[name](2)},
+		{name: "max equal", value: "ab", validator: MaxLen[name](2)},
+		{name: "max above", value: "abc", validator: MaxLen[name](2), wantFail: true},
+		{name: "negative min", value: "", validator: MinLen[name](-1)},
+		{name: "negative max", value: "", validator: MaxLen[name](-1), wantFail: true},
+		{name: "byte length", value: "é", validator: MaxLen[name](1), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	failures := validationFailures(name("a"), MinLen[name](2))
+	if failures[0].Value != "1" || failures[0].Reason != "length must be greater than or equal to 2" {
+		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestOneOf(t *testing.T) {
+	type mode string
+
+	tests := []struct {
+		name     string
+		value    mode
+		allowed  []mode
+		wantFail bool
+	}{
+		{name: "allowed", value: "fast", allowed: []mode{"fast", "safe"}},
+		{name: "rejected", value: "other", allowed: []mode{"fast", "safe"}, wantFail: true},
+		{name: "duplicate allowed", value: "fast", allowed: []mode{"fast", "fast"}},
+		{name: "empty allowed set", value: "fast", wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, OneOf(test.allowed...))
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	failures := validationFailures(mode("other"), OneOf(mode("fast"), mode("safe")))
+	if failures[0].Value != "other" || failures[0].Reason != "must be one of [fast safe]" {
+		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestSliceValidators(t *testing.T) {
+	type identifiers []int
+
+	tests := []struct {
+		name      string
+		value     identifiers
+		validator Validator[identifiers]
+		wantFail  bool
+	}{
+		{name: "not empty nil", value: nil, validator: SliceNotEmpty[identifiers](), wantFail: true},
+		{name: "not empty empty", value: identifiers{}, validator: SliceNotEmpty[identifiers](), wantFail: true},
+		{name: "not empty populated", value: identifiers{1}, validator: SliceNotEmpty[identifiers]()},
+		{name: "min below", value: identifiers{1}, validator: SliceMinLen[identifiers](2), wantFail: true},
+		{name: "min equal", value: identifiers{1, 2}, validator: SliceMinLen[identifiers](2)},
+		{name: "min above", value: identifiers{1, 2, 3}, validator: SliceMinLen[identifiers](2)},
+		{name: "max below", value: identifiers{1}, validator: SliceMaxLen[identifiers](2)},
+		{name: "max equal", value: identifiers{1, 2}, validator: SliceMaxLen[identifiers](2)},
+		{name: "max above", value: identifiers{1, 2, 3}, validator: SliceMaxLen[identifiers](2), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	failures := validationFailures(identifiers(nil), SliceNotEmpty[identifiers]())
+	if failures[0].Value != "0" || failures[0].Reason != "must not be empty" {
+		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestMapValidators(t *testing.T) {
+	type labels map[string]int
+
+	tests := []struct {
+		name      string
+		value     labels
+		validator Validator[labels]
+		wantFail  bool
+	}{
+		{name: "not empty nil", value: nil, validator: MapNotEmpty[labels](), wantFail: true},
+		{name: "not empty empty", value: labels{}, validator: MapNotEmpty[labels](), wantFail: true},
+		{name: "not empty populated", value: labels{"a": 1}, validator: MapNotEmpty[labels]()},
+		{name: "min below", value: labels{"a": 1}, validator: MapMinLen[labels](2), wantFail: true},
+		{name: "min equal", value: labels{"a": 1, "b": 2}, validator: MapMinLen[labels](2)},
+		{name: "min above", value: labels{"a": 1, "b": 2, "c": 3}, validator: MapMinLen[labels](2)},
+		{name: "max below", value: labels{"a": 1}, validator: MapMaxLen[labels](2)},
+		{name: "max equal", value: labels{"a": 1, "b": 2}, validator: MapMaxLen[labels](2)},
+		{name: "max above", value: labels{"a": 1, "b": 2, "c": 3}, validator: MapMaxLen[labels](2), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	got := validationFailures(labels(nil), MapNotEmpty[labels]())
+	want := []ValidationError{{Value: "0", Reason: "must not be empty"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failures = %+v, want %+v", got, want)
+	}
+}

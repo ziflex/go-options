@@ -2,7 +2,7 @@ package options
 
 import "strings"
 
-// ValidationError represents an error that occurs when validating configuration options. It contains information about the field that caused the error, the invalid value, and the reason for the validation failure.
+// ValidationError describes a rejected configuration value.
 type ValidationError struct {
 	// Field identifies the name of the field that produced the error.
 	Field string
