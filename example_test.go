@@ -81,7 +81,7 @@ func ExampleCheck() {
 	// 4 <nil>
 }
 
-func ExampleNotNilPtr() {
+func ExampleNotNil() {
 	type resource struct{}
 	type config struct {
 		resource *resource
@@ -91,7 +91,7 @@ func ExampleNotNilPtr() {
 		func(config *config, value *resource) {
 			config.resource = value
 		},
-		options.NotNilPtr[resource](),
+		options.NotNil[*resource](),
 	)
 
 	_, err := options.Apply(withResource(nil))

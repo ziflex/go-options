@@ -1,8 +1,11 @@
 package options
 
 import (
+	"bytes"
+	"io"
 	"math"
 	"testing"
+	"unsafe"
 )
 
 func validationFailures[V any](value V, validator Validator[V]) []ValidationError {
@@ -68,19 +71,85 @@ func TestNamed(t *testing.T) {
 	})
 }
 
-func TestNotNilPtr(t *testing.T) {
-	value := 1
-	if failures := validationFailures(&value, NotNilPtr[int]()); len(failures) != 0 {
-		t.Fatalf("non-nil pointer failures = %+v", failures)
+func TestNotNil(t *testing.T) {
+	wantFailure := ValidationError{Value: "<nil>", Reason: "must not be nil"}
+	assertValid := func(t *testing.T, failures []ValidationError) {
+		t.Helper()
+		if len(failures) != 0 {
+			t.Fatalf("failures = %+v, want none", failures)
+		}
+	}
+	assertNil := func(t *testing.T, failures []ValidationError) {
+		t.Helper()
+		if len(failures) != 1 {
+			t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
+		}
+		if failures[0] != wantFailure {
+			t.Fatalf("failure = %+v, want %+v", failures[0], wantFailure)
+		}
 	}
 
-	failures := validationFailures((*int)(nil), NotNilPtr[int]())
-	if len(failures) != 1 {
-		t.Fatalf("nil pointer failure count = %d, want 1", len(failures))
-	}
-	if failures[0] != (ValidationError{Value: "<nil>", Reason: "must not be nil"}) {
-		t.Fatalf("failure = %+v", failures[0])
-	}
+	t.Run("pointer", func(t *testing.T) {
+		var nilPointer *int
+		assertNil(t, validationFailures(nilPointer, NotNil[*int]()))
+
+		value := 1
+		assertValid(t, validationFailures(&value, NotNil[*int]()))
+	})
+
+	t.Run("interface", func(t *testing.T) {
+		var nilWriter io.Writer
+		assertNil(t, validationFailures(nilWriter, NotNil[io.Writer]()))
+
+		var writer io.Writer = &bytes.Buffer{}
+		assertValid(t, validationFailures(writer, NotNil[io.Writer]()))
+	})
+
+	t.Run("typed nil in interface", func(t *testing.T) {
+		var writer io.Writer = (*bytes.Buffer)(nil)
+		assertNil(t, validationFailures(writer, NotNil[io.Writer]()))
+	})
+
+	t.Run("slice", func(t *testing.T) {
+		var nilSlice []int
+		assertNil(t, validationFailures(nilSlice, NotNil[[]int]()))
+		assertValid(t, validationFailures([]int{}, NotNil[[]int]()))
+	})
+
+	t.Run("map", func(t *testing.T) {
+		var nilMap map[string]int
+		assertNil(t, validationFailures(nilMap, NotNil[map[string]int]()))
+		assertValid(t, validationFailures(map[string]int{}, NotNil[map[string]int]()))
+	})
+
+	t.Run("function", func(t *testing.T) {
+		var nilFunction func()
+		assertNil(t, validationFailures(nilFunction, NotNil[func()]()))
+		assertValid(t, validationFailures(func() {}, NotNil[func()]()))
+	})
+
+	t.Run("channel", func(t *testing.T) {
+		var nilChannel chan int
+		assertNil(t, validationFailures(nilChannel, NotNil[chan int]()))
+
+		channel := make(chan int)
+		defer close(channel)
+		assertValid(t, validationFailures(channel, NotNil[chan int]()))
+	})
+
+	t.Run("unsafe pointer", func(t *testing.T) {
+		var nilPointer unsafe.Pointer
+		assertNil(t, validationFailures(nilPointer, NotNil[unsafe.Pointer]()))
+
+		value := 1
+		assertValid(t, validationFailures(unsafe.Pointer(&value), NotNil[unsafe.Pointer]()))
+	})
+
+	t.Run("non-nilable values", func(t *testing.T) {
+		assertValid(t, validationFailures(0, NotNil[int]()))
+		assertValid(t, validationFailures(false, NotNil[bool]()))
+		assertValid(t, validationFailures(struct{}{}, NotNil[struct{}]()))
+	})
 }
 
 func TestNotZero(t *testing.T) {

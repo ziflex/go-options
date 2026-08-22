@@ -3,6 +3,7 @@ package options
 import (
 	"cmp"
 	"fmt"
+	"reflect"
 	"strconv"
 )
 
@@ -37,14 +38,33 @@ func Named[V any](field string, validators ...Validator[V]) Validator[V] {
 	}
 }
 
-// NotNilPtr rejects nil pointers.
-func NotNilPtr[V any]() Validator[*V] {
-	return func(value *V, report Report) {
-		if value == nil {
+// NotNil rejects nil values, including typed nil values stored in interfaces.
+// Values whose type cannot be nil always pass validation.
+func NotNil[V any]() Validator[V] {
+	return func(value V, report Report) {
+		reflected := reflect.ValueOf(value)
+		if !reflected.IsValid() {
 			report(ValidationError{
 				Value:  "<nil>",
 				Reason: "must not be nil",
 			})
+			return
+		}
+
+		switch reflected.Kind() {
+		case reflect.Chan,
+			reflect.Func,
+			reflect.Interface,
+			reflect.Map,
+			reflect.Pointer,
+			reflect.Slice,
+			reflect.UnsafePointer:
+			if reflected.IsNil() {
+				report(ValidationError{
+					Value:  "<nil>",
+					Reason: "must not be nil",
+				})
+			}
 		}
 	}
 }

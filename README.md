@@ -133,9 +133,10 @@ var WithEvenWorkers = options.New(
 
 ### Built-in validators
 
-The package includes `NotNilPtr`, `NotZero`, `NotEmpty`, `Min`, `Max`, `MinLen`,
-`MaxLen`, and `OneOf`. `NotNilPtr[T]` deliberately validates only `*T` values.
-String length is measured in bytes, matching Go's `len`.
+The package includes `NotNil`, `NotZero`, `NotEmpty`, `Min`, `Max`, `MinLen`,
+`MaxLen`, and `OneOf`. `NotNil[V]` rejects nil pointers, interfaces (including
+typed nils), slices, maps, functions, and channels; values of non-nilable types
+always pass. String length is measured in bytes, matching Go's `len`.
 
 Slices use `SliceNotEmpty`, `SliceMinLen`, and `SliceMaxLen`; maps use
 `MapNotEmpty`, `MapMinLen`, and `MapMaxLen`. These helpers are statically typed so
