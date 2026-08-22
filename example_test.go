@@ -101,6 +101,26 @@ func ExampleNotNil() {
 	// must not be nil: value=<nil>
 }
 
+func ExampleNotNilPtr() {
+	type resource struct{}
+	type config struct {
+		resource *resource
+	}
+
+	withResource := options.New(
+		func(config *config, value *resource) {
+			config.resource = value
+		},
+		options.NotNilPtr[resource](),
+	)
+
+	_, err := options.Apply(withResource(nil))
+	fmt.Println(err)
+
+	// Output:
+	// cannot be nil
+}
+
 func ExampleApplyTo() {
 	defaults := exampleConfig{timeout: 30 * time.Second, workers: 2}
 	config, err := options.ApplyTo(defaults, withWorkers(4))

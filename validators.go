@@ -69,6 +69,16 @@ func NotNil[V any]() Validator[V] {
 	}
 }
 
+// NotNilPtr rejects nil pointers without using reflection. Use NotNil when the
+// value may be another nil-capable type.
+func NotNilPtr[V any]() Validator[*V] {
+	return func(value *V, report Report) {
+		if value == nil {
+			report(ValidationError{Reason: "cannot be nil"})
+		}
+	}
+}
+
 // NotZero rejects the zero value of V.
 func NotZero[V comparable]() Validator[V] {
 	return func(value V, report Report) {

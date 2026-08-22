@@ -152,6 +152,28 @@ func TestNotNil(t *testing.T) {
 	})
 }
 
+func TestNotNilPtr(t *testing.T) {
+	var validator Validator[*int] = NotNilPtr[int]()
+
+	t.Run("nil pointer", func(t *testing.T) {
+		failures := validationFailures((*int)(nil), validator)
+		if len(failures) != 1 {
+			t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
+		}
+		want := ValidationError{Reason: "cannot be nil"}
+		if failures[0] != want {
+			t.Fatalf("failure = %+v, want %+v", failures[0], want)
+		}
+	})
+
+	t.Run("non-nil pointer", func(t *testing.T) {
+		value := 1
+		if failures := validationFailures(&value, validator); len(failures) != 0 {
+			t.Fatalf("failures = %+v, want none", failures)
+		}
+	})
+}
+
 func TestNotZero(t *testing.T) {
 	type count int
 
