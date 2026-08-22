@@ -18,87 +18,148 @@ go get github.com/ziflex/go-options
 
 - `Option[T any]`: A function type `func(*T, Report)` used to modify a configuration of type `T`.
 - `Report`: A callback function `func(ValidationError)` used within an `Option` to report validation errors.
+- `Validator[V any]`: A function type `func(V, Report)` used to validate an option value without receiving the destination configuration.
 - `ValidationError`: A struct representing a validation failure, containing `Field`, `Value`, and `Reason`.
 
 ### Functions
 
-- `Apply[T any](opts ...Option[T]) (T, error)`: Creates a zero-value instance of `T` and applies the provided options. Returns the populated instance and any collected errors (joined via `errors.Join`).
-- `ApplyWithValues[T any](initial T, opts ...Option[T]) (T, error)`: Applies options to an existing instance of `T`.
+- `Apply(opts...)` creates a zero-value configuration and applies the options.
+- `ApplyTo(initial, opts...)` applies options to an existing configuration.
+- `With(value, setter, validators...)` creates one option.
+- `New(setter, validators...)` creates a reusable option constructor.
+- `Check(check)` adapts custom validation logic.
+- `Named(field, validators...)` adds optional diagnostic context.
+
+Validation failures are collected with `errors.Join`. All validators run, but the
+setter is called only when none of them reports a failure. Nil options and nil
+validators are ignored.
+
+`ApplyWithValues` remains available as a deprecated alias for `ApplyTo`.
 
 ## Examples
 
-### Basic Usage
+### Declaration styles
+
+`New` creates concise reusable option constructors, while `With` supports
+traditional function declarations. Both styles use the same validation and
+assignment behavior and can be used together:
 
 ```go
 package main
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/ziflex/go-options"
 )
 
 type Config struct {
-	Name    string
-	Timeout int
+	Timeout time.Duration
+	Workers int
 }
 
-func WithName(name string) options.Option[Config] {
-	return func(c *Config, _ options.Report) {
-		c.Name = name
-	}
+var WithTimeout = options.New(
+	func(config *Config, value time.Duration) {
+		config.Timeout = value
+	},
+	options.Min(time.Second),
+)
+
+func WithWorkers(value int) options.Option[Config] {
+	return options.With(
+		value,
+		func(config *Config, value int) {
+			config.Workers = value
+		},
+		options.Min(1),
+		options.Max(32),
+	)
 }
 
 func main() {
-	// Apply options to a new Config instance
-	cfg, err := options.Apply(WithName("my-service"))
+	config, err := options.Apply(
+		WithTimeout(5*time.Second),
+		WithWorkers(4),
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Name: %s\n", cfg.Name)
+	fmt.Println(config.Timeout, config.Workers)
 }
 ```
 
-### Validation
+### Named diagnostics
 
-`go-options` makes it easy to validate your configuration as it's being built.
+Validators do not require a field name. Use `Named` only when the additional
+context is useful:
 
 ```go
-func WithTimeout(seconds int) options.Option[Config] {
-	return func(c *Config, report options.Report) {
-		if seconds < 0 {
-			report(options.ValidationError{
-				Field:  "Timeout",
-				Reason: "timeout cannot be negative",
-				Value:  fmt.Sprintf("%d", seconds),
-			})
-			return
-		}
-		c.Timeout = seconds
-	}
-}
-
-func main() {
-	_, err := options.Apply(WithTimeout(-1))
-	if err != nil {
-		fmt.Println("Validation failed:", err)
-	}
-}
+var WithNamedWorkers = options.New(
+	func(config *Config, value int) {
+		config.Workers = value
+	},
+	options.Named(
+		"workers",
+		options.Min(1),
+		options.Max(32),
+	),
+)
 ```
 
-### Applying to Existing Config
+### Custom validation
+
+`Check` is the escape hatch for application-specific rules. A check may report
+more than one `ValidationError`:
 
 ```go
-func main() {
-	initial := Config{Name: "default", Timeout: 30}
-	
-	cfg, err := options.ApplyWithValues(initial, WithName("override"))
-	if err != nil {
-		panic(err)
+var Even = options.Check(func(value int, report options.Report) {
+	if value%2 != 0 {
+		report(options.ValidationError{
+			Reason: "must be even",
+			Value:  fmt.Sprint(value),
+		})
 	}
-	
-	fmt.Printf("Name: %s, Timeout: %d\n", cfg.Name, cfg.Timeout)
-}
+})
+
+var WithEvenWorkers = options.New(
+	func(config *Config, value int) {
+		config.Workers = value
+	},
+	Even,
+)
+```
+
+### Built-in validators
+
+The package includes `NotNil`, `NotNilPtr`, `NotZero`, `NotEmpty`, `Min`, `Max`,
+`MinLen`, `MaxLen`, and `OneOf`. `NotNil[V]` is the general-purpose validator: it
+rejects nil pointers, interfaces (including typed nils), slices, maps, functions,
+and channels, while values of non-nilable types always pass. `NotNilPtr[T]` is the
+reflection-free alternative for callers that want stronger pointer type intent.
+String length is measured in bytes, matching Go's `len`.
+
+Slices use `SliceNotEmpty`, `SliceMinLen`, and `SliceMaxLen`; maps use
+`MapNotEmpty`, `MapMinLen`, and `MapMaxLen`. These helpers are statically typed so
+unsupported kinds fail at compile time. The first type argument is sufficient for
+named collection types:
+
+```go
+type Names []string
+type Labels map[string]int
+
+var NamesRequired = options.SliceNotEmpty[Names]()
+var NamesLimited = options.SliceMaxLen[Names](10)
+var LabelsRequired = options.MapNotEmpty[Labels]()
+var LabelsLimited = options.MapMaxLen[Labels](10)
+```
+
+### Applying to an existing configuration
+
+```go
+defaults := Config{Timeout: 30 * time.Second}
+config, err := options.ApplyTo(defaults, WithTimeout(5*time.Second))
 ```
 
 ## License
