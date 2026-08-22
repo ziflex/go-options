@@ -38,7 +38,11 @@ validators are ignored.
 
 ## Examples
 
-### Reusable option constructors
+### Declaration styles
+
+`New` creates concise reusable option constructors, while `With` supports
+traditional function declarations. Both styles use the same validation and
+assignment behavior and can be used together:
 
 ```go
 package main
@@ -62,30 +66,27 @@ var WithTimeout = options.New(
 	options.Min(time.Second),
 )
 
+func WithWorkers(value int) options.Option[Config] {
+	return options.With(
+		value,
+		func(config *Config, value int) {
+			config.Workers = value
+		},
+		options.Min(1),
+		options.Max(32),
+	)
+}
+
 func main() {
-	config, err := options.Apply(WithTimeout(5 * time.Second))
+	config, err := options.Apply(
+		WithTimeout(5*time.Second),
+		WithWorkers(4),
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(config.Timeout)
-}
-```
-
-### Traditional option functions
-
-`With` supports conventional function declarations without duplicating validation
-and assignment control flow:
-
-```go
-func WithTimeout(value time.Duration) options.Option[Config] {
-	return options.With(
-		value,
-		func(config *Config, value time.Duration) {
-			config.Timeout = value
-		},
-		options.Min(time.Second),
-	)
+	fmt.Println(config.Timeout, config.Workers)
 }
 ```
 
@@ -95,7 +96,7 @@ Validators do not require a field name. Use `Named` only when the additional
 context is useful:
 
 ```go
-var WithWorkers = options.New(
+var WithNamedWorkers = options.New(
 	func(config *Config, value int) {
 		config.Workers = value
 	},
@@ -121,12 +122,20 @@ var Even = options.Check(func(value int, report options.Report) {
 		})
 	}
 })
+
+var WithEvenWorkers = options.New(
+	func(config *Config, value int) {
+		config.Workers = value
+	},
+	Even,
+)
 ```
 
 ### Built-in validators
 
-The package includes `NotNil`, `NotZero`, `NotEmpty`, `Min`, `Max`, `MinLen`,
-`MaxLen`, and `OneOf`. String length is measured in bytes, matching Go's `len`.
+The package includes `NotNilPtr`, `NotZero`, `NotEmpty`, `Min`, `Max`, `MinLen`,
+`MaxLen`, and `OneOf`. `NotNilPtr[T]` deliberately validates only `*T` values.
+String length is measured in bytes, matching Go's `len`.
 
 Slices use `SliceNotEmpty`, `SliceMinLen`, and `SliceMaxLen`; maps use
 `MapNotEmpty`, `MapMinLen`, and `MapMaxLen`. These helpers are statically typed so

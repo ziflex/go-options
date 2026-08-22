@@ -18,10 +18,10 @@ func Apply[T any](opts ...Option[T]) (T, error) {
 	return applyInternal(zero, opts)
 }
 
-// ApplyTo applies each non-nil option to values in order. It returns the
+// ApplyTo applies each non-nil option to the initial value in order. It returns the
 // resulting value and any reported failures joined into one error.
-func ApplyTo[T any](values T, opts ...Option[T]) (T, error) {
-	return applyInternal(values, opts)
+func ApplyTo[T any](initial T, opts ...Option[T]) (T, error) {
+	return applyInternal(initial, opts)
 }
 
 // ApplyWithValues applies opts to values in order.

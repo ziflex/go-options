@@ -37,8 +37,8 @@ func Named[V any](field string, validators ...Validator[V]) Validator[V] {
 	}
 }
 
-// NotNil rejects nil pointers.
-func NotNil[V any]() Validator[*V] {
+// NotNilPtr rejects nil pointers.
+func NotNilPtr[V any]() Validator[*V] {
 	return func(value *V, report Report) {
 		if value == nil {
 			report(ValidationError{
@@ -174,7 +174,6 @@ func MapMaxLen[M ~map[K]V, K comparable, V any](maximum int) Validator[M] {
 func reportNotEmptyLength(length int, report Report) {
 	if length == 0 {
 		report(ValidationError{
-			Value:  strconv.Itoa(length),
 			Reason: "must not be empty",
 		})
 	}
@@ -183,7 +182,6 @@ func reportNotEmptyLength(length int, report Report) {
 func reportMinLength(length, minimum int, report Report) {
 	if length < minimum {
 		report(ValidationError{
-			Value:  strconv.Itoa(length),
 			Reason: fmt.Sprintf("length must be greater than or equal to %d", minimum),
 		})
 	}
@@ -192,7 +190,6 @@ func reportMinLength(length, minimum int, report Report) {
 func reportMaxLength(length, maximum int, report Report) {
 	if length > maximum {
 		report(ValidationError{
-			Value:  strconv.Itoa(length),
 			Reason: fmt.Sprintf("length must be less than or equal to %d", maximum),
 		})
 	}

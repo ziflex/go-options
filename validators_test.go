@@ -2,7 +2,6 @@ package options
 
 import (
 	"math"
-	"reflect"
 	"testing"
 )
 
@@ -69,13 +68,13 @@ func TestNamed(t *testing.T) {
 	})
 }
 
-func TestNotNil(t *testing.T) {
+func TestNotNilPtr(t *testing.T) {
 	value := 1
-	if failures := validationFailures(&value, NotNil[int]()); len(failures) != 0 {
+	if failures := validationFailures(&value, NotNilPtr[int]()); len(failures) != 0 {
 		t.Fatalf("non-nil pointer failures = %+v", failures)
 	}
 
-	failures := validationFailures((*int)(nil), NotNil[int]())
+	failures := validationFailures((*int)(nil), NotNilPtr[int]())
 	if len(failures) != 1 {
 		t.Fatalf("nil pointer failure count = %d, want 1", len(failures))
 	}
@@ -183,9 +182,13 @@ func TestStringLengthValidators(t *testing.T) {
 		})
 	}
 
-	failures := validationFailures(name("a"), MinLen[name](2))
-	if failures[0].Value != "1" || failures[0].Reason != "length must be greater than or equal to 2" {
-		t.Fatalf("failure = %+v", failures[0])
+	minFailure := validationFailures(name("a"), MinLen[name](2))[0]
+	if minFailure.Value != "" || minFailure.Reason != "length must be greater than or equal to 2" {
+		t.Fatalf("minimum-length failure = %+v", minFailure)
+	}
+	maxFailure := validationFailures(name("ab"), MaxLen[name](1))[0]
+	if maxFailure.Value != "" || maxFailure.Reason != "length must be less than or equal to 1" {
+		t.Fatalf("maximum-length failure = %+v", maxFailure)
 	}
 }
 
@@ -246,9 +249,15 @@ func TestSliceValidators(t *testing.T) {
 		})
 	}
 
-	failures := validationFailures(identifiers(nil), SliceNotEmpty[identifiers]())
-	if failures[0].Value != "0" || failures[0].Reason != "must not be empty" {
-		t.Fatalf("failure = %+v", failures[0])
+	diagnostics := []ValidationError{
+		validationFailures(identifiers(nil), SliceNotEmpty[identifiers]())[0],
+		validationFailures(identifiers{1}, SliceMinLen[identifiers](2))[0],
+		validationFailures(identifiers{1, 2}, SliceMaxLen[identifiers](1))[0],
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Value != "" {
+			t.Errorf("failure Value = %q, want empty: %+v", diagnostic.Value, diagnostic)
+		}
 	}
 }
 
@@ -280,9 +289,14 @@ func TestMapValidators(t *testing.T) {
 		})
 	}
 
-	got := validationFailures(labels(nil), MapNotEmpty[labels]())
-	want := []ValidationError{{Value: "0", Reason: "must not be empty"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("failures = %+v, want %+v", got, want)
+	diagnostics := []ValidationError{
+		validationFailures(labels(nil), MapNotEmpty[labels]())[0],
+		validationFailures(labels{"a": 1}, MapMinLen[labels](2))[0],
+		validationFailures(labels{"a": 1, "b": 2}, MapMaxLen[labels](1))[0],
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Value != "" {
+			t.Errorf("failure Value = %q, want empty: %+v", diagnostic.Value, diagnostic)
+		}
 	}
 }
