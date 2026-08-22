@@ -17,6 +17,7 @@ go get github.com/ziflex/go-options
 ### Types
 
 - `Option[T any]`: A function type `func(*T, Report)` used to modify a configuration of type `T`.
+- `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
 - `Report`: A callback function `func(ValidationError)` used within an `Option` to report validation errors.
 - `Validator[V any]`: A function type `func(V, Report)` used to validate an option value without receiving the destination configuration.
 - `ValidationError`: A struct representing a validation failure, containing `Field`, `Value`, and `Reason`.
@@ -25,10 +26,8 @@ go get github.com/ziflex/go-options
 
 - `Apply(opts...)` creates a zero-value configuration and applies the options.
 - `ApplyTo(initial, opts...)` applies options to an existing configuration.
-- `With(value, setter, validators...)` creates one option.
-- `New(setter, validators...)` creates a reusable option constructor.
+- `New(setter)` creates an option builder and infers its configuration and value types from the setter.
 - `Check(check)` adapts custom validation logic.
-- `Named(field, validators...)` adds optional diagnostic context.
 
 Validation failures are collected with `errors.Join`. All validators run, but the
 setter is called only when none of them reports a failure. Nil options and nil
@@ -38,11 +37,18 @@ validators are ignored.
 
 ## Examples
 
-### Declaration styles
+### Building options
 
-`New` creates concise reusable option constructors, while `With` supports
-traditional function declarations. Both styles use the same validation and
-assignment behavior and can be used together:
+Option construction has five stages:
+
+- `New` defines how the option modifies its configuration.
+- `Value` binds the required option value, including an explicit zero value.
+- `Named` optionally adds field context to validation failures.
+- `Validators` optionally appends validators in execution order.
+- `Build` produces the final `Option`.
+
+Builder methods return updated values, so base builders can be reused safely.
+Conventional `WithX` functions build one option per call:
 
 ```go
 package main
@@ -59,22 +65,25 @@ type Config struct {
 	Workers int
 }
 
-var WithTimeout = options.New(
-	func(config *Config, value time.Duration) {
-		config.Timeout = value
-	},
-	options.Min(time.Second),
-)
+func WithWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
+		config.Workers = value
+	}).
+		Value(workers).
+		Validators(options.Min(1), options.Max(32)).
+		Build()
+}
 
-func WithWorkers(value int) options.Option[Config] {
-	return options.With(
-		value,
-		func(config *Config, value int) {
-			config.Workers = value
+func WithTimeout(timeout time.Duration) options.Option[Config] {
+	return options.New(
+		func(config *Config, value time.Duration) {
+			config.Timeout = value
 		},
-		options.Min(1),
-		options.Max(32),
-	)
+	).
+		Value(timeout).
+		Named("timeout").
+		Validators(options.Min(time.Second)).
+		Build()
 }
 
 func main() {
@@ -96,16 +105,15 @@ Validators do not require a field name. Use `Named` only when the additional
 context is useful:
 
 ```go
-var WithNamedWorkers = options.New(
-	func(config *Config, value int) {
+func WithNamedWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
 		config.Workers = value
-	},
-	options.Named(
-		"workers",
-		options.Min(1),
-		options.Max(32),
-	),
-)
+	}).
+		Value(workers).
+		Named("workers").
+		Validators(options.Min(1), options.Max(32)).
+		Build()
+}
 ```
 
 ### Custom validation
@@ -123,12 +131,14 @@ var Even = options.Check(func(value int, report options.Report) {
 	}
 })
 
-var WithEvenWorkers = options.New(
-	func(config *Config, value int) {
+func WithEvenWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
 		config.Workers = value
-	},
-	Even,
-)
+	}).
+		Value(workers).
+		Validators(Even).
+		Build()
+}
 ```
 
 ### Built-in validators

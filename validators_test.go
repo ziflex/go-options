@@ -33,44 +33,6 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func TestNamed(t *testing.T) {
-	t.Run("adds field to every unnamed failure", func(t *testing.T) {
-		failures := validationFailures(5, Named("workers", Min(10), Max(1)))
-		if len(failures) != 2 {
-			t.Fatalf("failure count = %d, want 2", len(failures))
-		}
-		for _, failure := range failures {
-			if failure.Field != "workers" {
-				t.Errorf("failure field = %q, want workers", failure.Field)
-			}
-		}
-	})
-
-	t.Run("preserves existing field", func(t *testing.T) {
-		validator := Named("outer", Check(func(_ int, report Report) {
-			report(ValidationError{Field: "inner", Reason: "invalid"})
-		}))
-		failures := validationFailures(0, validator)
-		if len(failures) != 1 || failures[0].Field != "inner" {
-			t.Fatalf("failures = %+v, want existing inner field", failures)
-		}
-	})
-
-	t.Run("leaves diagnostics unnamed when field is empty", func(t *testing.T) {
-		failures := validationFailures(0, Named("", Min(1)))
-		if len(failures) != 1 || failures[0].Field != "" {
-			t.Fatalf("failures = %+v, want unnamed failure", failures)
-		}
-	})
-
-	t.Run("ignores nil validators", func(t *testing.T) {
-		failures := validationFailures(0, Named[int]("value", nil, Min(1)))
-		if len(failures) != 1 || failures[0].Field != "value" {
-			t.Fatalf("failures = %+v", failures)
-		}
-	})
-}
-
 func TestNotNil(t *testing.T) {
 	wantFailure := ValidationError{Value: "<nil>", Reason: "must not be nil"}
 	assertValid := func(t *testing.T, failures []ValidationError) {

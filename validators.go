@@ -16,28 +16,6 @@ func Check[V any](check func(V, Report)) Validator[V] {
 	return check
 }
 
-// Named associates field with failures reported by validators. Existing field
-// names are preserved, allowing custom and nested validators to be more specific.
-func Named[V any](field string, validators ...Validator[V]) Validator[V] {
-	return func(value V, report Report) {
-		namedReport := func(err ValidationError) {
-			if err.Field == "" {
-				err.Field = field
-			}
-
-			report(err)
-		}
-
-		for _, validator := range validators {
-			if validator == nil {
-				continue
-			}
-
-			validator(value, namedReport)
-		}
-	}
-}
-
 // NotNil rejects nil values, including typed nil values stored in interfaces.
 // Values whose type cannot be nil always pass validation.
 func NotNil[V any]() Validator[V] {

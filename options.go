@@ -31,39 +31,6 @@ func ApplyWithValues[T any](values T, opts ...Option[T]) (T, error) {
 	return ApplyTo(values, opts...)
 }
 
-// New creates a reusable option constructor from setter and validators. Each
-// constructed option delegates its behavior to With.
-func New[C, V any](setter func(*C, V), validators ...Validator[V]) func(V) Option[C] {
-	return func(value V) Option[C] {
-		return With(value, setter, validators...)
-	}
-}
-
-// With creates an option that validates value before passing it to setter.
-// Every non-nil validator runs in order. The setter runs only when no validator
-// reports a failure.
-func With[C, V any](value V, setter func(*C, V), validators ...Validator[V]) Option[C] {
-	return func(config *C, report Report) {
-		valid := true
-		validatorReport := func(err ValidationError) {
-			valid = false
-			report(err)
-		}
-
-		for _, validator := range validators {
-			if validator == nil {
-				continue
-			}
-
-			validator(value, validatorReport)
-		}
-
-		if valid {
-			setter(config, value)
-		}
-	}
-}
-
 func applyInternal[T any](values T, opts []Option[T]) (T, error) {
 	var errs []error
 
