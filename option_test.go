@@ -12,23 +12,61 @@ type Config struct {
 }
 
 func WithName(name string) Option[Config] {
-	return func(c *Config, _ Report) {
+	return func(c *Config) error {
 		c.Name = name
+
+		return nil
 	}
 }
 
 func WithTimeout(timeout int) Option[Config] {
-	return func(c *Config, report Report) {
+	return func(c *Config) error {
 		if timeout < 0 {
-			report(ValidationError{
+			return ValidationError{
 				Field:  "Timeout",
 				Reason: "timeout cannot be negative",
 				Value:  "invalid",
-			})
-			return
+			}
 		}
 		c.Timeout = timeout
+
+		return nil
 	}
+}
+
+func TestOption(t *testing.T) {
+	t.Run("successful option returns nil and mutates config", func(t *testing.T) {
+		var config Config
+		if err := WithName("test")(&config); err != nil {
+			t.Fatalf("option error = %v", err)
+		}
+		if config.Name != "test" {
+			t.Fatalf("config.Name = %q, want test", config.Name)
+		}
+	})
+
+	t.Run("custom option returns ordinary error", func(t *testing.T) {
+		want := errors.New("custom failure")
+		option := Option[Config](func(*Config) error { return want })
+
+		_, err := Apply(option)
+		if !errors.Is(err, want) {
+			t.Fatalf("Apply() error = %v, want custom failure", err)
+		}
+	})
+
+	t.Run("custom option returns joined errors", func(t *testing.T) {
+		first := errors.New("first")
+		second := errors.New("second")
+		option := Option[Config](func(*Config) error {
+			return errors.Join(first, second)
+		})
+
+		_, err := Apply(option)
+		if !errors.Is(err, first) || !errors.Is(err, second) {
+			t.Fatalf("Apply() error = %v, want both custom failures", err)
+		}
+	})
 }
 
 func TestApply(t *testing.T) {
@@ -77,6 +115,26 @@ func TestApply(t *testing.T) {
 			t.Errorf("expected joined error, got %T", err)
 		} else if len(errs.Unwrap()) != 2 {
 			t.Errorf("expected 2 errors, got %d", len(errs.Unwrap()))
+		}
+	})
+
+	t.Run("failure does not prevent later failing option", func(t *testing.T) {
+		first := errors.New("first")
+		second := errors.New("second")
+		calls := 0
+		failing := func(want error) Option[Config] {
+			return func(*Config) error {
+				calls++
+				return want
+			}
+		}
+
+		_, err := Apply(failing(first), failing(second))
+		if calls != 2 {
+			t.Fatalf("option calls = %d, want 2", calls)
+		}
+		if !errors.Is(err, first) || !errors.Is(err, second) {
+			t.Fatalf("Apply() error = %v, want both failures", err)
 		}
 	})
 

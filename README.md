@@ -4,7 +4,7 @@ A lightweight, generic functional options library for Go with built-in validatio
 
 ## Overview
 
-`go-options` provides a clean and type-safe way to implement the functional options pattern in Go. It leverages generics to work with any configuration struct and includes a built-in mechanism for reporting and collecting validation errors.
+`go-options` provides a clean and type-safe way to implement the functional options pattern in Go. It leverages generics to work with any configuration struct and composes option and validation failures with ordinary Go errors.
 
 ## Installation
 
@@ -16,9 +16,8 @@ go get github.com/ziflex/go-options
 
 ### Types
 
-- `Option[T any]`: A function type `func(*T, Report)` used to modify a configuration of type `T`.
+- `Option[T any]`: A function type `func(*T) error` used to modify a configuration of type `T`.
 - `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
-- `Report`: A callback function `func(ValidationError)` used within an `Option` to report validation errors.
 - `Validator[V any]`: A function type `func(V) error` used to validate an option value without receiving the destination configuration.
 - `ValidationError`: A struct representing a validation failure, containing `Field`, `Value`, and `Reason`.
 
@@ -28,10 +27,10 @@ go get github.com/ziflex/go-options
 - `ApplyTo(initial, opts...)` applies options to an existing configuration.
 - `New(setter)` creates an option builder and infers its configuration and value types from the setter.
 
-Validation failures are collected with `errors.Join`. All validators run, but the
-setter is called only when all of them return `nil`. Validators may return
-`errors.Join` to describe multiple failures. Nil options and nil
-validators are ignored.
+`Apply` invokes every option and combines returned failures with `errors.Join`.
+Builder-produced options run every validator, but call their setter only when all
+validators return `nil`. Validators and custom options may return `errors.Join`
+to describe multiple failures. Nil options and nil validators are ignored.
 
 `ApplyWithValues` remains available as a deprecated alias for `ApplyTo`.
 
@@ -98,6 +97,31 @@ func main() {
 	fmt.Println(config.Timeout, config.Workers)
 }
 ```
+
+### Custom options
+
+Options may also be implemented directly. Return `nil` after a successful
+mutation or return an ordinary Go error when the option cannot be applied:
+
+```go
+func WithWorkers(workers int) options.Option[Config] {
+	return func(config *Config) error {
+		if workers < 1 {
+			return options.ValidationError{
+				Field:  "workers",
+				Reason: "must be positive",
+			}
+		}
+
+		config.Workers = workers
+
+		return nil
+	}
+}
+```
+
+A custom option with independent failures can return
+`errors.Join(firstError, secondError)`.
 
 ### Named diagnostics
 

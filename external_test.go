@@ -31,3 +31,23 @@ func TestCustomValidatorContract(t *testing.T) {
 		t.Fatalf("validator(1) error = %v", err)
 	}
 }
+
+func TestCustomOptionContract(t *testing.T) {
+	type config struct {
+		value int
+	}
+
+	var option options.Option[config] = func(config *config) error {
+		config.value = 1
+
+		return nil
+	}
+
+	got, err := options.Apply(option)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if got.value != 1 {
+		t.Fatalf("config.value = %d, want 1", got.value)
+	}
+}

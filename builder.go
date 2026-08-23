@@ -1,6 +1,9 @@
 package options
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // Builder describes an option for configuration type C with value type V.
 // Create builders with New.
@@ -44,7 +47,7 @@ func (b Builder[C, V]) Validators(validators ...Validator[V]) Builder[C, V] {
 }
 
 // Build produces the configured option. If Value was not called, the option
-// reports a validation failure when applied.
+// returns a validation failure when applied.
 func (b Builder[C, V]) Build() Option[C] {
 	setter := b.setter
 	value := b.value
@@ -52,14 +55,12 @@ func (b Builder[C, V]) Build() Option[C] {
 	name := b.name
 	validators := append([]Validator[V](nil), b.validators...)
 
-	return func(config *C, report Report) {
+	return func(config *C) error {
 		if !hasValue {
-			report(ValidationError{Reason: "option value was not provided"})
-
-			return
+			return ValidationError{Reason: "option value was not provided"}
 		}
 
-		valid := true
+		var errs []error
 
 		for _, validator := range validators {
 			if validator == nil {
@@ -67,73 +68,16 @@ func (b Builder[C, V]) Build() Option[C] {
 			}
 
 			if err := validator(value); err != nil {
-				valid = false
-				reportValidatorError(err, name, report)
+				errs = append(errs, normalizeValidationError(name, err))
 			}
 		}
 
-		if valid {
-			setter(config, value)
-		}
-	}
-}
-
-func reportValidatorError(err error, field string, report Report) {
-	switch err := err.(type) {
-	case interface {
-		error
-		Unwrap() []error
-	}:
-		hasChildren := false
-
-		for _, child := range err.Unwrap() {
-			if child != nil {
-				hasChildren = true
-				reportValidatorError(child, field, report)
-			}
+		if err := errors.Join(errs...); err != nil {
+			return err
 		}
 
-		if !hasChildren {
-			report(ValidationError{Field: field, Reason: err.Error()})
-		}
+		setter(config, value)
 
-		return
-	case interface {
-		error
-		Unwrap() error
-	}:
-		if child := err.Unwrap(); child != nil {
-			reportValidatorError(child, field, report)
-
-			return
-		}
+		return nil
 	}
-
-	var validationError ValidationError
-	if errors.As(err, &validationError) {
-		reportNamedValidationError(validationError, field, report)
-
-		return
-	}
-
-	var validationErrorPointer *ValidationError
-	if errors.As(err, &validationErrorPointer) {
-		if validationErrorPointer != nil {
-			reportNamedValidationError(*validationErrorPointer, field, report)
-		} else {
-			report(ValidationError{Field: field, Reason: "<nil>"})
-		}
-
-		return
-	}
-
-	report(ValidationError{Field: field, Reason: err.Error()})
-}
-
-func reportNamedValidationError(err ValidationError, field string, report Report) {
-	if err.Field == "" {
-		err.Field = field
-	}
-
-	report(err)
 }
