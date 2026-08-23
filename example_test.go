@@ -1,6 +1,7 @@
 package options_test
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,69 +13,79 @@ type exampleConfig struct {
 	workers int
 }
 
-var withTimeout = options.New(
-	func(config *exampleConfig, value time.Duration) {
-		config.timeout = value
-	},
-	options.Min(time.Second),
-)
-
 func ExampleNew() {
-	config, err := options.Apply(withTimeout(5 * time.Second))
-	fmt.Println(config.timeout, err)
-
-	// Output:
-	// 5s <nil>
-}
-
-func withWorkers(value int) options.Option[exampleConfig] {
-	return options.With(
-		value,
-		func(config *exampleConfig, value int) {
-			config.workers = value
-		},
-		options.Min(1),
-		options.Max(32),
-	)
-}
-
-func ExampleWith() {
-	config, err := options.Apply(withWorkers(4))
+	option := options.New(func(config *exampleConfig, value int) {
+		config.workers = value
+	}).
+		Value(4).
+		Validators(options.Min(1), options.Max(32)).
+		Build()
+	config, err := options.Apply(option)
 	fmt.Println(config.workers, err)
 
 	// Output:
 	// 4 <nil>
 }
 
-func ExampleNamed() {
-	withNamedWorkers := options.New(
+func ExampleBuilder() {
+	option := options.New(
+		func(config *exampleConfig, value time.Duration) {
+			config.timeout = value
+		},
+	).
+		Value(5 * time.Second).
+		Named("timeout").
+		Validators(options.Min(time.Second)).
+		Build()
+	config, err := options.Apply(option)
+	fmt.Println(config.timeout, err)
+
+	// Output:
+	// 5s <nil>
+}
+
+func ExampleBuilder_Named() {
+	option := options.New(
 		func(config *exampleConfig, value int) {
 			config.workers = value
 		},
-		options.Named("workers", options.Min(1), options.Max(32)),
-	)
+	).
+		Value(0).
+		Named("workers").
+		Validators(func(value int) error {
+			if value < 1 {
+				return errors.New("must be greater than or equal to 1")
+			}
 
-	_, err := options.Apply(withNamedWorkers(0))
+			return nil
+		}).
+		Build()
+
+	_, err := options.Apply(option)
 	fmt.Println(err)
 
 	// Output:
 	// workers: must be greater than or equal to 1: value=0
 }
 
-func ExampleCheck() {
-	even := options.Check(func(value int, report options.Report) {
+func ExampleValidator() {
+	even := options.Validator[int](func(value int) error {
 		if value%2 != 0 {
-			report(options.ValidationError{Reason: "must be even"})
+			return options.ValidationError{Reason: errors.New("must be even")}
 		}
+
+		return nil
 	})
-	withEvenWorkers := options.New(
+	option := options.New(
 		func(config *exampleConfig, value int) {
 			config.workers = value
 		},
-		even,
-	)
+	).
+		Value(4).
+		Validators(even).
+		Build()
 
-	config, err := options.Apply(withEvenWorkers(4))
+	config, err := options.Apply(option)
 	fmt.Println(config.workers, err)
 
 	// Output:
@@ -87,18 +98,20 @@ func ExampleNotNil() {
 		resource *resource
 	}
 
-	withResource := options.New(
+	option := options.New(
 		func(config *config, value *resource) {
 			config.resource = value
 		},
-		options.NotNil[*resource](),
-	)
+	).
+		Value((*resource)(nil)).
+		Validators(options.NotNil[*resource]()).
+		Build()
 
-	_, err := options.Apply(withResource(nil))
+	_, err := options.Apply(option)
 	fmt.Println(err)
 
 	// Output:
-	// must not be nil: value=<nil>
+	// must not be nil: value=<nil>: value=<nil>
 }
 
 func ExampleNotNilPtr() {
@@ -107,23 +120,28 @@ func ExampleNotNilPtr() {
 		resource *resource
 	}
 
-	withResource := options.New(
+	option := options.New(
 		func(config *config, value *resource) {
 			config.resource = value
 		},
-		options.NotNilPtr[resource](),
-	)
+	).
+		Value((*resource)(nil)).
+		Validators(options.NotNilPtr[resource]()).
+		Build()
 
-	_, err := options.Apply(withResource(nil))
+	_, err := options.Apply(option)
 	fmt.Println(err)
 
 	// Output:
-	// cannot be nil
+	// cannot be nil: value=<nil>
 }
 
 func ExampleApplyTo() {
 	defaults := exampleConfig{timeout: 30 * time.Second, workers: 2}
-	config, err := options.ApplyTo(defaults, withWorkers(4))
+	option := options.New(func(config *exampleConfig, value int) {
+		config.workers = value
+	}).Value(4).Build()
+	config, err := options.ApplyTo(defaults, option)
 	fmt.Println(config.timeout, config.workers, err)
 
 	// Output:

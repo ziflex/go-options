@@ -1,6 +1,7 @@
 package options_test
 
 import (
+	"errors"
 	"testing"
 
 	options "github.com/ziflex/go-options"
@@ -15,5 +16,39 @@ func TestCollectionValidatorTypeInference(t *testing.T) {
 
 	if sliceValidator == nil || mapValidator == nil {
 		t.Fatal("expected collection validators")
+	}
+}
+
+func TestCustomValidatorContract(t *testing.T) {
+	var validator options.Validator[int] = func(value int) error {
+		if value < 0 {
+			return options.ValidationError{Reason: errors.New("must not be negative")}
+		}
+
+		return nil
+	}
+
+	if err := validator(1); err != nil {
+		t.Fatalf("validator(1) error = %v", err)
+	}
+}
+
+func TestCustomOptionContract(t *testing.T) {
+	type config struct {
+		value int
+	}
+
+	var option options.Option[config] = func(config *config) error {
+		config.value = 1
+
+		return nil
+	}
+
+	got, err := options.Apply(option)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if got.value != 1 {
+		t.Fatalf("config.value = %d, want 1", got.value)
 	}
 }

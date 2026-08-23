@@ -4,7 +4,7 @@ A lightweight, generic functional options library for Go with built-in validatio
 
 ## Overview
 
-`go-options` provides a clean and type-safe way to implement the functional options pattern in Go. It leverages generics to work with any configuration struct and includes a built-in mechanism for reporting and collecting validation errors.
+`go-options` provides a clean and type-safe way to implement the functional options pattern in Go. It leverages generics to work with any configuration struct and composes option and validation failures with ordinary Go errors.
 
 ## Installation
 
@@ -16,33 +16,42 @@ go get github.com/ziflex/go-options
 
 ### Types
 
-- `Option[T any]`: A function type `func(*T, Report)` used to modify a configuration of type `T`.
-- `Report`: A callback function `func(ValidationError)` used within an `Option` to report validation errors.
-- `Validator[V any]`: A function type `func(V, Report)` used to validate an option value without receiving the destination configuration.
-- `ValidationError`: A struct representing a validation failure, containing `Field`, `Value`, and `Reason`.
+- `Option[T any]`: A function type `func(*T) error` used to modify a configuration of type `T`.
+- `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
+- `Validator[V any]`: A function type `func(V) error` used to validate an option value without receiving the destination configuration.
+- `ValidationError`: A struct representing a validation failure, containing
+  `Field`, `Value`, and an error-valued `Reason`.
 
 ### Functions
 
 - `Apply(opts...)` creates a zero-value configuration and applies the options.
 - `ApplyTo(initial, opts...)` applies options to an existing configuration.
-- `With(value, setter, validators...)` creates one option.
-- `New(setter, validators...)` creates a reusable option constructor.
-- `Check(check)` adapts custom validation logic.
-- `Named(field, validators...)` adds optional diagnostic context.
+- `New(setter)` creates an option builder and infers its configuration and value types from the setter.
 
-Validation failures are collected with `errors.Join`. All validators run, but the
-setter is called only when none of them reports a failure. Nil options and nil
-validators are ignored.
+`Apply` invokes every option and combines returned failures with `errors.Join`.
+Builder-produced options run every validator, but call their setter only when all
+validators return `nil`. Validators and custom options may return `errors.Join`
+to describe multiple failures. Nil options and nil validators are ignored.
+`ValidationError` unwraps its `Reason`, so callers can inspect underlying causes
+with `errors.Is` and `errors.As`.
 
 `ApplyWithValues` remains available as a deprecated alias for `ApplyTo`.
 
 ## Examples
 
-### Declaration styles
+### Building options
 
-`New` creates concise reusable option constructors, while `With` supports
-traditional function declarations. Both styles use the same validation and
-assignment behavior and can be used together:
+Option construction has five stages:
+
+- `New` defines how the option modifies its configuration.
+- `Value` binds the required option value, including an explicit zero value.
+- `Named` optionally sets the option name used when `Build` wraps validation
+  failures.
+- `Validators` optionally appends validators in execution order.
+- `Build` produces the final `Option`.
+
+Builder methods return updated values, so base builders can be reused safely.
+Conventional `WithX` functions build one option per call:
 
 ```go
 package main
@@ -59,22 +68,25 @@ type Config struct {
 	Workers int
 }
 
-var WithTimeout = options.New(
-	func(config *Config, value time.Duration) {
-		config.Timeout = value
-	},
-	options.Min(time.Second),
-)
+func WithWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
+		config.Workers = value
+	}).
+		Value(workers).
+		Validators(options.Min(1), options.Max(32)).
+		Build()
+}
 
-func WithWorkers(value int) options.Option[Config] {
-	return options.With(
-		value,
-		func(config *Config, value int) {
-			config.Workers = value
+func WithTimeout(timeout time.Duration) options.Option[Config] {
+	return options.New(
+		func(config *Config, value time.Duration) {
+			config.Timeout = value
 		},
-		options.Min(1),
-		options.Max(32),
-	)
+	).
+		Value(timeout).
+		Named("timeout").
+		Validators(options.Min(time.Second)).
+		Build()
 }
 
 func main() {
@@ -90,44 +102,82 @@ func main() {
 }
 ```
 
-### Named diagnostics
+### Custom options
 
-Validators do not require a field name. Use `Named` only when the additional
-context is useful:
+Options may also be implemented directly. Return `nil` after a successful
+mutation or return an ordinary Go error when the option cannot be applied:
 
 ```go
-var WithNamedWorkers = options.New(
-	func(config *Config, value int) {
+func WithWorkers(workers int) options.Option[Config] {
+	return func(config *Config) error {
+		if workers < 1 {
+			return options.ValidationError{
+				Field:  "workers",
+				Reason: errors.New("must be positive"),
+			}
+		}
+
+		config.Workers = workers
+
+		return nil
+	}
+}
+```
+
+A custom option with independent failures can return
+`errors.Join(firstError, secondError)`.
+
+### Named diagnostics
+
+Validators do not require a field name. `Named` identifies the option being
+configured; `Build` places that name on its validation wrapper without changing
+the error returned by the validator:
+
+```go
+func WithNamedWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
 		config.Workers = value
-	},
-	options.Named(
-		"workers",
-		options.Min(1),
-		options.Max(32),
-	),
-)
+	}).
+		Value(workers).
+		Named("workers").
+		Validators(options.Min(1), options.Max(32)).
+		Build()
+}
 ```
 
 ### Custom validation
 
-`Check` is the escape hatch for application-specific rules. A check may report
-more than one `ValidationError`:
+Use `Validator` for application-specific rules. Return `nil` when the value is
+valid or an error describing why it is invalid:
 
 ```go
-var Even = options.Check(func(value int, report options.Report) {
+var Even = options.Validator[int](func(value int) error {
 	if value%2 != 0 {
-		report(options.ValidationError{
-			Reason: "must be even",
+		return options.ValidationError{
+			Reason: errors.New("must be even"),
 			Value:  fmt.Sprint(value),
-		})
+		}
 	}
+
+	return nil
 })
 
-var WithEvenWorkers = options.New(
-	func(config *Config, value int) {
+func WithEvenWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
 		config.Workers = value
-	},
-	Even,
+	}).
+		Value(workers).
+		Validators(Even).
+		Build()
+}
+```
+
+Return `errors.Join` when one validator needs to describe multiple failures:
+
+```go
+return errors.Join(
+	options.ValidationError{Reason: errors.New("must be even")},
+	options.ValidationError{Reason: errors.New("must be positive")},
 )
 ```
 

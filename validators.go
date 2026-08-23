@@ -2,53 +2,27 @@ package options
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 )
 
-// Validator validates a value and reports each validation failure it finds.
-// Validators should treat the value as read-only.
-type Validator[V any] func(V, Report)
-
-// Check adapts check into a Validator. A check may report multiple failures.
-func Check[V any](check func(V, Report)) Validator[V] {
-	return check
-}
-
-// Named associates field with failures reported by validators. Existing field
-// names are preserved, allowing custom and nested validators to be more specific.
-func Named[V any](field string, validators ...Validator[V]) Validator[V] {
-	return func(value V, report Report) {
-		namedReport := func(err ValidationError) {
-			if err.Field == "" {
-				err.Field = field
-			}
-
-			report(err)
-		}
-
-		for _, validator := range validators {
-			if validator == nil {
-				continue
-			}
-
-			validator(value, namedReport)
-		}
-	}
-}
+// Validator validates a value. It returns nil when the value is valid and an
+// error describing why validation failed otherwise. Validators should treat the
+// value as read-only. Use errors.Join to return multiple failures.
+type Validator[V any] func(V) error
 
 // NotNil rejects nil values, including typed nil values stored in interfaces.
 // Values whose type cannot be nil always pass validation.
 func NotNil[V any]() Validator[V] {
-	return func(value V, report Report) {
+	return func(value V) error {
 		reflected := reflect.ValueOf(value)
 		if !reflected.IsValid() {
-			report(ValidationError{
+			return ValidationError{
 				Value:  "<nil>",
-				Reason: "must not be nil",
-			})
-			return
+				Reason: errors.New("must not be nil"),
+			}
 		}
 
 		switch reflected.Kind() {
@@ -60,167 +34,186 @@ func NotNil[V any]() Validator[V] {
 			reflect.Slice,
 			reflect.UnsafePointer:
 			if reflected.IsNil() {
-				report(ValidationError{
+				return ValidationError{
 					Value:  "<nil>",
-					Reason: "must not be nil",
-				})
+					Reason: errors.New("must not be nil"),
+				}
 			}
 		}
+
+		return nil
 	}
 }
 
 // NotNilPtr rejects nil pointers without using reflection. Use NotNil when the
 // value may be another nil-capable type.
 func NotNilPtr[V any]() Validator[*V] {
-	return func(value *V, report Report) {
+	return func(value *V) error {
 		if value == nil {
-			report(ValidationError{Reason: "cannot be nil"})
+			return ValidationError{Reason: errors.New("cannot be nil")}
 		}
+
+		return nil
 	}
 }
 
 // NotZero rejects the zero value of V.
 func NotZero[V comparable]() Validator[V] {
-	return func(value V, report Report) {
+	return func(value V) error {
 		var zero V
+
 		if value == zero {
-			report(ValidationError{
+			return ValidationError{
 				Value:  fmt.Sprint(value),
-				Reason: "must not be zero",
-			})
+				Reason: errors.New("must not be zero"),
+			}
 		}
+
+		return nil
 	}
 }
 
 // NotEmpty rejects empty string values.
 func NotEmpty[S ~string]() Validator[S] {
-	return func(value S, report Report) {
+	return func(value S) error {
 		if value == "" {
-			report(ValidationError{
+			return ValidationError{
 				Value:  strconv.Quote(string(value)),
-				Reason: "must not be empty",
-			})
+				Reason: errors.New("must not be empty"),
+			}
 		}
+
+		return nil
 	}
 }
 
 // Min rejects values smaller than minimum.
 func Min[V cmp.Ordered](minimum V) Validator[V] {
-	return func(value V, report Report) {
+	return func(value V) error {
 		if value < minimum {
-			report(ValidationError{
+			return ValidationError{
 				Value:  fmt.Sprint(value),
-				Reason: fmt.Sprintf("must be greater than or equal to %v", minimum),
-			})
+				Reason: fmt.Errorf("must be greater than or equal to %v", minimum),
+			}
 		}
+
+		return nil
 	}
 }
 
 // Max rejects values larger than maximum.
 func Max[V cmp.Ordered](maximum V) Validator[V] {
-	return func(value V, report Report) {
+	return func(value V) error {
 		if value > maximum {
-			report(ValidationError{
+			return ValidationError{
 				Value:  fmt.Sprint(value),
-				Reason: fmt.Sprintf("must be less than or equal to %v", maximum),
-			})
+				Reason: fmt.Errorf("must be less than or equal to %v", maximum),
+			}
 		}
+
+		return nil
 	}
 }
 
 // MinLen rejects strings shorter than minimum bytes.
 func MinLen[S ~string](minimum int) Validator[S] {
-	return func(value S, report Report) {
-		reportMinLength(len(value), minimum, report)
+	return func(value S) error {
+		return validateMinLength(len(value), minimum)
 	}
 }
 
 // MaxLen rejects strings longer than maximum bytes.
 func MaxLen[S ~string](maximum int) Validator[S] {
-	return func(value S, report Report) {
-		reportMaxLength(len(value), maximum, report)
+	return func(value S) error {
+		return validateMaxLength(len(value), maximum)
 	}
 }
 
 // OneOf rejects values not equal to one of allowed. An empty allowed set rejects
 // every value.
 func OneOf[V comparable](allowed ...V) Validator[V] {
-	return func(value V, report Report) {
+	return func(value V) error {
 		for _, candidate := range allowed {
 			if value == candidate {
-				return
+				return nil
 			}
 		}
 
-		report(ValidationError{
+		return ValidationError{
 			Value:  fmt.Sprint(value),
-			Reason: fmt.Sprintf("must be one of %v", allowed),
-		})
+			Reason: fmt.Errorf("must be one of %v", allowed),
+		}
 	}
 }
 
 // SliceNotEmpty rejects nil and empty slices.
 func SliceNotEmpty[S ~[]E, E any]() Validator[S] {
-	return func(value S, report Report) {
-		reportNotEmptyLength(len(value), report)
+	return func(value S) error {
+		return validateNotEmptyLength(len(value))
 	}
 }
 
 // SliceMinLen rejects slices shorter than minimum.
 func SliceMinLen[S ~[]E, E any](minimum int) Validator[S] {
-	return func(value S, report Report) {
-		reportMinLength(len(value), minimum, report)
+	return func(value S) error {
+		return validateMinLength(len(value), minimum)
 	}
 }
 
 // SliceMaxLen rejects slices longer than maximum.
 func SliceMaxLen[S ~[]E, E any](maximum int) Validator[S] {
-	return func(value S, report Report) {
-		reportMaxLength(len(value), maximum, report)
+	return func(value S) error {
+		return validateMaxLength(len(value), maximum)
 	}
 }
 
 // MapNotEmpty rejects nil and empty maps.
 func MapNotEmpty[M ~map[K]V, K comparable, V any]() Validator[M] {
-	return func(value M, report Report) {
-		reportNotEmptyLength(len(value), report)
+	return func(value M) error {
+		return validateNotEmptyLength(len(value))
 	}
 }
 
 // MapMinLen rejects maps with fewer than minimum entries.
 func MapMinLen[M ~map[K]V, K comparable, V any](minimum int) Validator[M] {
-	return func(value M, report Report) {
-		reportMinLength(len(value), minimum, report)
+	return func(value M) error {
+		return validateMinLength(len(value), minimum)
 	}
 }
 
 // MapMaxLen rejects maps with more than maximum entries.
 func MapMaxLen[M ~map[K]V, K comparable, V any](maximum int) Validator[M] {
-	return func(value M, report Report) {
-		reportMaxLength(len(value), maximum, report)
+	return func(value M) error {
+		return validateMaxLength(len(value), maximum)
 	}
 }
 
-func reportNotEmptyLength(length int, report Report) {
+func validateNotEmptyLength(length int) error {
 	if length == 0 {
-		report(ValidationError{
-			Reason: "must not be empty",
-		})
+		return ValidationError{
+			Reason: errors.New("must not be empty"),
+		}
 	}
+
+	return nil
 }
 
-func reportMinLength(length, minimum int, report Report) {
+func validateMinLength(length, minimum int) error {
 	if length < minimum {
-		report(ValidationError{
-			Reason: fmt.Sprintf("length must be greater than or equal to %d", minimum),
-		})
+		return ValidationError{
+			Reason: fmt.Errorf("length must be greater than or equal to %d", minimum),
+		}
 	}
+
+	return nil
 }
 
-func reportMaxLength(length, maximum int, report Report) {
+func validateMaxLength(length, maximum int) error {
 	if length > maximum {
-		report(ValidationError{
-			Reason: fmt.Sprintf("length must be less than or equal to %d", maximum),
-		})
+		return ValidationError{
+			Reason: fmt.Errorf("length must be less than or equal to %d", maximum),
+		}
 	}
+
+	return nil
 }

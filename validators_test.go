@@ -2,6 +2,7 @@ package options
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math"
 	"testing"
@@ -9,70 +10,21 @@ import (
 )
 
 func validationFailures[V any](value V, validator Validator[V]) []ValidationError {
-	var failures []ValidationError
-	validator(value, func(err ValidationError) {
-		failures = append(failures, err)
-	})
-	return failures
-}
-
-func TestCheck(t *testing.T) {
-	validator := Check(func(value int, report Report) {
-		if value < 1 {
-			report(ValidationError{Reason: "too small"})
-			report(ValidationError{Reason: "not positive"})
-		}
-	})
-
-	failures := validationFailures(0, validator)
-	if len(failures) != 2 {
-		t.Fatalf("failure count = %d, want 2", len(failures))
+	err := validator(value)
+	if err == nil {
+		return nil
 	}
-	if failures[0].Reason != "too small" || failures[1].Reason != "not positive" {
-		t.Fatalf("failures = %+v", failures)
+
+	var failure ValidationError
+	if !errors.As(err, &failure) {
+		return nil
 	}
-}
 
-func TestNamed(t *testing.T) {
-	t.Run("adds field to every unnamed failure", func(t *testing.T) {
-		failures := validationFailures(5, Named("workers", Min(10), Max(1)))
-		if len(failures) != 2 {
-			t.Fatalf("failure count = %d, want 2", len(failures))
-		}
-		for _, failure := range failures {
-			if failure.Field != "workers" {
-				t.Errorf("failure field = %q, want workers", failure.Field)
-			}
-		}
-	})
-
-	t.Run("preserves existing field", func(t *testing.T) {
-		validator := Named("outer", Check(func(_ int, report Report) {
-			report(ValidationError{Field: "inner", Reason: "invalid"})
-		}))
-		failures := validationFailures(0, validator)
-		if len(failures) != 1 || failures[0].Field != "inner" {
-			t.Fatalf("failures = %+v, want existing inner field", failures)
-		}
-	})
-
-	t.Run("leaves diagnostics unnamed when field is empty", func(t *testing.T) {
-		failures := validationFailures(0, Named("", Min(1)))
-		if len(failures) != 1 || failures[0].Field != "" {
-			t.Fatalf("failures = %+v, want unnamed failure", failures)
-		}
-	})
-
-	t.Run("ignores nil validators", func(t *testing.T) {
-		failures := validationFailures(0, Named[int]("value", nil, Min(1)))
-		if len(failures) != 1 || failures[0].Field != "value" {
-			t.Fatalf("failures = %+v", failures)
-		}
-	})
+	return []ValidationError{failure}
 }
 
 func TestNotNil(t *testing.T) {
-	wantFailure := ValidationError{Value: "<nil>", Reason: "must not be nil"}
+	wantFailure := ValidationError{Value: "<nil>", Reason: errors.New("must not be nil")}
 	assertValid := func(t *testing.T, failures []ValidationError) {
 		t.Helper()
 		if len(failures) != 0 {
@@ -84,7 +36,7 @@ func TestNotNil(t *testing.T) {
 		if len(failures) != 1 {
 			t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
 		}
-		if failures[0] != wantFailure {
+		if !sameValidationError(failures[0], wantFailure) {
 			t.Fatalf("failure = %+v, want %+v", failures[0], wantFailure)
 		}
 	}
@@ -160,8 +112,8 @@ func TestNotNilPtr(t *testing.T) {
 		if len(failures) != 1 {
 			t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
 		}
-		want := ValidationError{Reason: "cannot be nil"}
-		if failures[0] != want {
+		want := ValidationError{Reason: errors.New("cannot be nil")}
+		if !sameValidationError(failures[0], want) {
 			t.Fatalf("failure = %+v, want %+v", failures[0], want)
 		}
 	})
@@ -181,7 +133,7 @@ func TestNotZero(t *testing.T) {
 		t.Fatalf("non-zero failures = %+v", failures)
 	}
 	failures := validationFailures(count(0), NotZero[count]())
-	if len(failures) != 1 || failures[0].Reason != "must not be zero" {
+	if len(failures) != 1 || errorMessage(failures[0].Reason) != "must not be zero" {
 		t.Fatalf("zero failures = %+v", failures)
 	}
 
@@ -204,7 +156,7 @@ func TestNotEmpty(t *testing.T) {
 	if len(failures) != 1 {
 		t.Fatalf("empty failure count = %d, want 1", len(failures))
 	}
-	if failures[0].Value != `""` || failures[0].Reason != "must not be empty" {
+	if failures[0].Value != `""` || errorMessage(failures[0].Reason) != "must not be empty" {
 		t.Fatalf("failure = %+v", failures[0])
 	}
 }
@@ -274,11 +226,11 @@ func TestStringLengthValidators(t *testing.T) {
 	}
 
 	minFailure := validationFailures(name("a"), MinLen[name](2))[0]
-	if minFailure.Value != "" || minFailure.Reason != "length must be greater than or equal to 2" {
+	if minFailure.Value != "" || errorMessage(minFailure.Reason) != "length must be greater than or equal to 2" {
 		t.Fatalf("minimum-length failure = %+v", minFailure)
 	}
 	maxFailure := validationFailures(name("ab"), MaxLen[name](1))[0]
-	if maxFailure.Value != "" || maxFailure.Reason != "length must be less than or equal to 1" {
+	if maxFailure.Value != "" || errorMessage(maxFailure.Reason) != "length must be less than or equal to 1" {
 		t.Fatalf("maximum-length failure = %+v", maxFailure)
 	}
 }
@@ -307,7 +259,7 @@ func TestOneOf(t *testing.T) {
 	}
 
 	failures := validationFailures(mode("other"), OneOf(mode("fast"), mode("safe")))
-	if failures[0].Value != "other" || failures[0].Reason != "must be one of [fast safe]" {
+	if failures[0].Value != "other" || errorMessage(failures[0].Reason) != "must be one of [fast safe]" {
 		t.Fatalf("failure = %+v", failures[0])
 	}
 }

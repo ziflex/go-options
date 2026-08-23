@@ -9,7 +9,7 @@ type ValidationError struct {
 	// Value identifies the invalid non-secret input.
 	Value string
 	// Reason explains why the configuration is invalid.
-	Reason string
+	Reason error
 }
 
 func (d ValidationError) Error() string {
@@ -20,7 +20,9 @@ func (d ValidationError) Error() string {
 		b.WriteString(": ")
 	}
 
-	b.WriteString(d.Reason)
+	if d.Reason != nil {
+		b.WriteString(d.Reason.Error())
+	}
 
 	if d.Value != "" {
 		b.WriteString(": value=")
@@ -28,4 +30,9 @@ func (d ValidationError) Error() string {
 	}
 
 	return b.String()
+}
+
+// Unwrap returns the error that explains the validation failure.
+func (d ValidationError) Unwrap() error {
+	return d.Reason
 }
