@@ -359,11 +359,38 @@ func TestMinAndMax(t *testing.T) {
 	if failures := validationFailures("a", Min("b")); len(failures) != 1 {
 		t.Fatalf("ordered string failure count = %d, want 1", len(failures))
 	}
-	if failures := validationFailures(math.NaN(), Min(0.0)); len(failures) != 0 {
-		t.Fatalf("NaN Min failures = %+v", failures)
+
+	minFailure := validationFailures(count(1), Min(count(2)))
+	wantMinFailure := ValidationError{Value: "1", Reason: errors.New("must be greater than or equal to 2")}
+	if len(minFailure) != 1 || !sameValidationError(minFailure[0], wantMinFailure) {
+		t.Fatalf("Min failure = %+v, want [%+v]", minFailure, wantMinFailure)
 	}
-	if failures := validationFailures(math.NaN(), Max(0.0)); len(failures) != 0 {
-		t.Fatalf("NaN Max failures = %+v", failures)
+	maxFailure := validationFailures(count(3), Max(count(2)))
+	wantMaxFailure := ValidationError{Value: "3", Reason: errors.New("must be less than or equal to 2")}
+	if len(maxFailure) != 1 || !sameValidationError(maxFailure[0], wantMaxFailure) {
+		t.Fatalf("Max failure = %+v, want [%+v]", maxFailure, wantMaxFailure)
+	}
+
+	floatTests := []struct {
+		name       string
+		value      float64
+		validator  Validator[float64]
+		wantValue  string
+		wantReason string
+	}{
+		{name: "Min NaN value", value: math.NaN(), validator: Min(0.0), wantValue: "NaN", wantReason: "must be greater than or equal to 0"},
+		{name: "Min NaN bound", value: 0, validator: Min(math.NaN()), wantValue: "0", wantReason: "must be greater than or equal to NaN"},
+		{name: "Max NaN value", value: math.NaN(), validator: Max(0.0), wantValue: "NaN", wantReason: "must be less than or equal to 0"},
+		{name: "Max NaN bound", value: 0, validator: Max(math.NaN()), wantValue: "0", wantReason: "must be less than or equal to NaN"},
+	}
+	for _, test := range floatTests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			want := ValidationError{Value: test.wantValue, Reason: errors.New(test.wantReason)}
+			if len(failures) != 1 || !sameValidationError(failures[0], want) {
+				t.Fatalf("failures = %+v, want [%+v]", failures, want)
+			}
+		})
 	}
 }
 

@@ -179,10 +179,10 @@ func NotBlank[S ~string]() Validator[S] {
 	}
 }
 
-// Min rejects values smaller than minimum.
+// Min rejects values that are not greater than or equal to minimum.
 func Min[V cmp.Ordered](minimum V) Validator[V] {
 	return func(value V) error {
-		if value < minimum {
+		if !(value >= minimum) {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
 				Reason: fmt.Errorf("must be greater than or equal to %v", minimum),
@@ -193,10 +193,10 @@ func Min[V cmp.Ordered](minimum V) Validator[V] {
 	}
 }
 
-// Max rejects values larger than maximum.
+// Max rejects values that are not less than or equal to maximum.
 func Max[V cmp.Ordered](maximum V) Validator[V] {
 	return func(value V) error {
-		if value > maximum {
+		if !(value <= maximum) {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
 				Reason: fmt.Errorf("must be less than or equal to %v", maximum),

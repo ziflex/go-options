@@ -200,8 +200,8 @@ return errors.Join(
 | `NonPositive[V]()` | Ordered numeric values | Accepts values `<= 0`; `NaN` fails. Supports named signed, unsigned, and floating-point types. |
 | `NotEmpty[S]()` | Strings | Rejects the empty string. |
 | `NotBlank[S]()` | Strings | Rejects empty strings and strings containing only Unicode whitespace. |
-| `Min[V](minimum)` | Ordered values | Accepts values `>= minimum`; `NaN` passes. |
-| `Max[V](maximum)` | Ordered values | Accepts values `<= maximum`; `NaN` passes. |
+| `Min[V](minimum)` | Ordered values | Accepts values `>= minimum`; `NaN` fails. |
+| `Max[V](maximum)` | Ordered values | Accepts values `<= maximum`; `NaN` fails. |
 | `Between[V](minimum, maximum)` | Ordered values | Accepts values within the inclusive bounds. `NaN` fails, and reversed bounds form an empty interval. |
 | `MinLen[S](minimum)` | Strings | Accepts strings whose byte length is at least `minimum`. |
 | `MaxLen[S](maximum)` | Strings | Accepts strings whose byte length is at most `maximum`. |
