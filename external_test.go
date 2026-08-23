@@ -1,6 +1,7 @@
 package options_test
 
 import (
+	"errors"
 	"testing"
 
 	options "github.com/ziflex/go-options"
@@ -21,7 +22,7 @@ func TestCollectionValidatorTypeInference(t *testing.T) {
 func TestCustomValidatorContract(t *testing.T) {
 	var validator options.Validator[int] = func(value int) error {
 		if value < 0 {
-			return options.ValidationError{Reason: "must not be negative"}
+			return options.ValidationError{Reason: errors.New("must not be negative")}
 		}
 
 		return nil

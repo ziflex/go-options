@@ -2,6 +2,7 @@ package options
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math"
 	"testing"
@@ -13,7 +14,7 @@ func validationFailures[V any](value V, validator Validator[V]) []ValidationErro
 }
 
 func TestNotNil(t *testing.T) {
-	wantFailure := ValidationError{Value: "<nil>", Reason: "must not be nil"}
+	wantFailure := ValidationError{Value: "<nil>", Reason: errors.New("must not be nil")}
 	assertValid := func(t *testing.T, failures []ValidationError) {
 		t.Helper()
 		if len(failures) != 0 {
@@ -25,7 +26,7 @@ func TestNotNil(t *testing.T) {
 		if len(failures) != 1 {
 			t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
 		}
-		if failures[0] != wantFailure {
+		if !sameValidationError(failures[0], wantFailure) {
 			t.Fatalf("failure = %+v, want %+v", failures[0], wantFailure)
 		}
 	}
@@ -101,8 +102,8 @@ func TestNotNilPtr(t *testing.T) {
 		if len(failures) != 1 {
 			t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
 		}
-		want := ValidationError{Reason: "cannot be nil"}
-		if failures[0] != want {
+		want := ValidationError{Reason: errors.New("cannot be nil")}
+		if !sameValidationError(failures[0], want) {
 			t.Fatalf("failure = %+v, want %+v", failures[0], want)
 		}
 	})
@@ -122,7 +123,7 @@ func TestNotZero(t *testing.T) {
 		t.Fatalf("non-zero failures = %+v", failures)
 	}
 	failures := validationFailures(count(0), NotZero[count]())
-	if len(failures) != 1 || failures[0].Reason != "must not be zero" {
+	if len(failures) != 1 || errorMessage(failures[0].Reason) != "must not be zero" {
 		t.Fatalf("zero failures = %+v", failures)
 	}
 
@@ -145,7 +146,7 @@ func TestNotEmpty(t *testing.T) {
 	if len(failures) != 1 {
 		t.Fatalf("empty failure count = %d, want 1", len(failures))
 	}
-	if failures[0].Value != `""` || failures[0].Reason != "must not be empty" {
+	if failures[0].Value != `""` || errorMessage(failures[0].Reason) != "must not be empty" {
 		t.Fatalf("failure = %+v", failures[0])
 	}
 }
@@ -215,11 +216,11 @@ func TestStringLengthValidators(t *testing.T) {
 	}
 
 	minFailure := validationFailures(name("a"), MinLen[name](2))[0]
-	if minFailure.Value != "" || minFailure.Reason != "length must be greater than or equal to 2" {
+	if minFailure.Value != "" || errorMessage(minFailure.Reason) != "length must be greater than or equal to 2" {
 		t.Fatalf("minimum-length failure = %+v", minFailure)
 	}
 	maxFailure := validationFailures(name("ab"), MaxLen[name](1))[0]
-	if maxFailure.Value != "" || maxFailure.Reason != "length must be less than or equal to 1" {
+	if maxFailure.Value != "" || errorMessage(maxFailure.Reason) != "length must be less than or equal to 1" {
 		t.Fatalf("maximum-length failure = %+v", maxFailure)
 	}
 }
@@ -248,7 +249,7 @@ func TestOneOf(t *testing.T) {
 	}
 
 	failures := validationFailures(mode("other"), OneOf(mode("fast"), mode("safe")))
-	if failures[0].Value != "other" || failures[0].Reason != "must be one of [fast safe]" {
+	if failures[0].Value != "other" || errorMessage(failures[0].Reason) != "must be one of [fast safe]" {
 		t.Fatalf("failure = %+v", failures[0])
 	}
 }

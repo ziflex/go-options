@@ -24,7 +24,7 @@ func WithTimeout(timeout int) Option[Config] {
 		if timeout < 0 {
 			return ValidationError{
 				Field:  "Timeout",
-				Reason: "timeout cannot be negative",
+				Reason: errors.New("timeout cannot be negative"),
 				Value:  "invalid",
 			}
 		}

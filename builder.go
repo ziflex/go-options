@@ -1,9 +1,6 @@
 package options
 
-import (
-	"errors"
-	"strings"
-)
+import "errors"
 
 // Builder describes an option for configuration type C with value type V.
 // Create builders with New.
@@ -57,7 +54,7 @@ func (b Builder[C, V]) Build() Option[C] {
 
 	return func(config *C) error {
 		if !hasValue {
-			return ValidationError{Reason: "option value was not provided"}
+			return ValidationError{Reason: errors.New("option value was not provided")}
 		}
 
 		var errs []error

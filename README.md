@@ -19,7 +19,8 @@ go get github.com/ziflex/go-options
 - `Option[T any]`: A function type `func(*T) error` used to modify a configuration of type `T`.
 - `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
 - `Validator[V any]`: A function type `func(V) error` used to validate an option value without receiving the destination configuration.
-- `ValidationError`: A struct representing a validation failure, containing `Field`, `Value`, and `Reason`.
+- `ValidationError`: A struct representing a validation failure, containing
+  `Field`, `Value`, and an error-valued `Reason`.
 
 ### Functions
 
@@ -31,6 +32,8 @@ go get github.com/ziflex/go-options
 Builder-produced options run every validator, but call their setter only when all
 validators return `nil`. Validators and custom options may return `errors.Join`
 to describe multiple failures. Nil options and nil validators are ignored.
+`ValidationError` unwraps its `Reason`, so callers can inspect underlying causes
+with `errors.Is` and `errors.As`.
 
 `ApplyWithValues` remains available as a deprecated alias for `ApplyTo`.
 
@@ -109,7 +112,7 @@ func WithWorkers(workers int) options.Option[Config] {
 		if workers < 1 {
 			return options.ValidationError{
 				Field:  "workers",
-				Reason: "must be positive",
+				Reason: errors.New("must be positive"),
 			}
 		}
 
@@ -149,7 +152,7 @@ valid or an error describing why it is invalid:
 var Even = options.Validator[int](func(value int) error {
 	if value%2 != 0 {
 		return options.ValidationError{
-			Reason: "must be even",
+			Reason: errors.New("must be even"),
 			Value:  fmt.Sprint(value),
 		}
 	}
@@ -171,8 +174,8 @@ Return `errors.Join` when one validator needs to describe multiple failures:
 
 ```go
 return errors.Join(
-	options.ValidationError{Reason: "must be even"},
-	options.ValidationError{Reason: "must be positive"},
+	options.ValidationError{Reason: errors.New("must be even")},
+	options.ValidationError{Reason: errors.New("must be positive")},
 )
 ```
 

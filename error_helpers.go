@@ -19,7 +19,7 @@ func normalizeValidationError(field string, err error) error {
 		return err
 	case *ValidationError:
 		if err == nil {
-			return ValidationError{Field: field, Reason: "<nil>"}
+			return ValidationError{Field: field, Reason: errors.New("<nil>")}
 		}
 		if err.Field != "" {
 			return err

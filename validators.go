@@ -2,6 +2,7 @@ package options
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -20,7 +21,7 @@ func NotNil[V any]() Validator[V] {
 		if !reflected.IsValid() {
 			return ValidationError{
 				Value:  "<nil>",
-				Reason: "must not be nil",
+				Reason: errors.New("must not be nil"),
 			}
 		}
 
@@ -35,7 +36,7 @@ func NotNil[V any]() Validator[V] {
 			if reflected.IsNil() {
 				return ValidationError{
 					Value:  "<nil>",
-					Reason: "must not be nil",
+					Reason: errors.New("must not be nil"),
 				}
 			}
 		}
@@ -49,7 +50,7 @@ func NotNil[V any]() Validator[V] {
 func NotNilPtr[V any]() Validator[*V] {
 	return func(value *V) error {
 		if value == nil {
-			return ValidationError{Reason: "cannot be nil"}
+			return ValidationError{Reason: errors.New("cannot be nil")}
 		}
 
 		return nil
@@ -64,7 +65,7 @@ func NotZero[V comparable]() Validator[V] {
 		if value == zero {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
-				Reason: "must not be zero",
+				Reason: errors.New("must not be zero"),
 			}
 		}
 
@@ -78,7 +79,7 @@ func NotEmpty[S ~string]() Validator[S] {
 		if value == "" {
 			return ValidationError{
 				Value:  strconv.Quote(string(value)),
-				Reason: "must not be empty",
+				Reason: errors.New("must not be empty"),
 			}
 		}
 
@@ -92,7 +93,7 @@ func Min[V cmp.Ordered](minimum V) Validator[V] {
 		if value < minimum {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
-				Reason: fmt.Sprintf("must be greater than or equal to %v", minimum),
+				Reason: fmt.Errorf("must be greater than or equal to %v", minimum),
 			}
 		}
 
@@ -106,7 +107,7 @@ func Max[V cmp.Ordered](maximum V) Validator[V] {
 		if value > maximum {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
-				Reason: fmt.Sprintf("must be less than or equal to %v", maximum),
+				Reason: fmt.Errorf("must be less than or equal to %v", maximum),
 			}
 		}
 
@@ -140,7 +141,7 @@ func OneOf[V comparable](allowed ...V) Validator[V] {
 
 		return ValidationError{
 			Value:  fmt.Sprint(value),
-			Reason: fmt.Sprintf("must be one of %v", allowed),
+			Reason: fmt.Errorf("must be one of %v", allowed),
 		}
 	}
 }
@@ -190,7 +191,7 @@ func MapMaxLen[M ~map[K]V, K comparable, V any](maximum int) Validator[M] {
 func validateNotEmptyLength(length int) error {
 	if length == 0 {
 		return ValidationError{
-			Reason: "must not be empty",
+			Reason: errors.New("must not be empty"),
 		}
 	}
 
@@ -200,7 +201,7 @@ func validateNotEmptyLength(length int) error {
 func validateMinLength(length, minimum int) error {
 	if length < minimum {
 		return ValidationError{
-			Reason: fmt.Sprintf("length must be greater than or equal to %d", minimum),
+			Reason: fmt.Errorf("length must be greater than or equal to %d", minimum),
 		}
 	}
 
@@ -210,7 +211,7 @@ func validateMinLength(length, minimum int) error {
 func validateMaxLength(length, maximum int) error {
 	if length > maximum {
 		return ValidationError{
-			Reason: fmt.Sprintf("length must be less than or equal to %d", maximum),
+			Reason: fmt.Errorf("length must be less than or equal to %d", maximum),
 		}
 	}
 

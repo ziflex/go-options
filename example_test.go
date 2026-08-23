@@ -1,6 +1,7 @@
 package options_test
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,7 +65,7 @@ func ExampleBuilder_Named() {
 func ExampleValidator() {
 	even := options.Validator[int](func(value int) error {
 		if value%2 != 0 {
-			return options.ValidationError{Reason: "must be even"}
+			return options.ValidationError{Reason: errors.New("must be even")}
 		}
 
 		return nil

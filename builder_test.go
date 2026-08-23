@@ -75,8 +75,8 @@ func TestBuilder(t *testing.T) {
 			t.Fatalf("ApplyTo() error = %q, want %q", got, want)
 		}
 		var validationError ValidationError
-		wantValidationError := ValidationError{Reason: "option value was not provided"}
-		if !errors.As(err, &validationError) || validationError != wantValidationError {
+		wantValidationError := ValidationError{Reason: errors.New("option value was not provided")}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, wantValidationError) {
 			t.Fatalf("ApplyTo() error = %v, want %+v", err, wantValidationError)
 		}
 		if setterCalls != 0 || validatorCalls != 0 || config != initial {
@@ -140,7 +140,7 @@ func TestBuilder(t *testing.T) {
 			Value(5).
 			Validators(func(_ int) error {
 				order = append(order, 1)
-				return ValidationError{Reason: "first"}
+				return ValidationError{Reason: errors.New("first")}
 			}).
 			Validators(
 				nil,
@@ -150,7 +150,7 @@ func TestBuilder(t *testing.T) {
 				},
 				func(_ int) error {
 					order = append(order, 3)
-					return ValidationError{Reason: "third"}
+					return ValidationError{Reason: errors.New("third")}
 				},
 			).
 			Build()
@@ -201,7 +201,7 @@ func TestBuilder(t *testing.T) {
 				Value(0).
 				Named("outer").
 				Validators(func(_ int) error {
-					return ValidationError{Field: "inner", Reason: "invalid"}
+					return ValidationError{Field: "inner", Reason: errors.New("invalid")}
 				}).
 				Build(),
 		)
@@ -216,7 +216,7 @@ func TestBuilder(t *testing.T) {
 	})
 
 	t.Run("Named enriches pointer failure without mutating it", func(t *testing.T) {
-		failure := &ValidationError{Reason: "invalid"}
+		failure := &ValidationError{Reason: errors.New("invalid")}
 		_, err := Apply(
 			New(setConstructorValue).
 				Value(0).
@@ -251,8 +251,8 @@ func TestBuilder(t *testing.T) {
 		}
 
 		var validationError ValidationError
-		want := ValidationError{Field: "value", Reason: "<nil>"}
-		if !errors.As(err, &validationError) || validationError != want {
+		want := ValidationError{Field: "value", Reason: errors.New("<nil>")}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
 			t.Fatalf("Apply() error = %v, want %+v", err, want)
 		}
 	})
@@ -281,7 +281,7 @@ func TestBuilder(t *testing.T) {
 			Validators(func(value int) error {
 				called = true
 				if value%2 != 0 {
-					return ValidationError{Reason: "must be even"}
+					return ValidationError{Reason: errors.New("must be even")}
 				}
 				return nil
 			}).
@@ -365,16 +365,16 @@ func TestBuilder(t *testing.T) {
 			Named("outer").
 			Validators(func(int) error {
 				return fmt.Errorf("validator context: %w", errors.Join(
-					ValidationError{Value: "first-value", Reason: "first"},
+					ValidationError{Value: "first-value", Reason: errors.New("first")},
 					fmt.Errorf("validation context: %w", errors.Join(
 						&ValidationError{
 							Field:  "inner",
 							Value:  "second-value",
-							Reason: "second",
+							Reason: errors.New("second"),
 						},
 						fmt.Errorf("deep context: %w", ValidationError{
 							Value:  "third-value",
-							Reason: "third",
+							Reason: errors.New("third"),
 						}),
 					)),
 					fmt.Errorf("plain context: %w", plainFailure),
@@ -391,11 +391,11 @@ func TestBuilder(t *testing.T) {
 		}
 
 		want := []ValidationError{
-			{Field: "outer", Value: "first-value", Reason: "first"},
-			{Field: "inner", Value: "second-value", Reason: "second"},
-			{Field: "outer", Value: "third-value", Reason: "third"},
+			{Field: "outer", Value: "first-value", Reason: errors.New("first")},
+			{Field: "inner", Value: "second-value", Reason: errors.New("second")},
+			{Field: "outer", Value: "third-value", Reason: errors.New("third")},
 		}
-		if got := validationErrors(err); !reflect.DeepEqual(got, want) {
+		if got := validationErrors(err); !sameValidationErrors(got, want) {
 			t.Fatalf("Apply() errors = %+v, want %+v", got, want)
 		}
 		if !errors.Is(err, plainFailure) {
@@ -431,13 +431,13 @@ func TestBuilder(t *testing.T) {
 				func(int) error {
 					order = append(order, 1)
 					return errors.Join(
-						ValidationError{Reason: "first"},
-						ValidationError{Reason: "second"},
+						ValidationError{Reason: errors.New("first")},
+						ValidationError{Reason: errors.New("second")},
 					)
 				},
 				func(int) error {
 					order = append(order, 2)
-					return ValidationError{Reason: "third"}
+					return ValidationError{Reason: errors.New("third")}
 				},
 			).
 			Build()
@@ -455,11 +455,11 @@ func TestBuilder(t *testing.T) {
 
 		got := validationErrors(err)
 		want := []ValidationError{
-			{Reason: "first"},
-			{Reason: "second"},
-			{Reason: "third"},
+			{Reason: errors.New("first")},
+			{Reason: errors.New("second")},
+			{Reason: errors.New("third")},
 		}
-		if !reflect.DeepEqual(got, want) {
+		if !sameValidationErrors(got, want) {
 			t.Fatalf("Apply() errors = %+v, want %+v", got, want)
 		}
 	})
@@ -486,4 +486,32 @@ func validationErrors(err error) []ValidationError {
 	default:
 		return nil
 	}
+}
+
+func sameValidationErrors(got, want []ValidationError) bool {
+	if len(got) != len(want) {
+		return false
+	}
+
+	for i := range got {
+		if !sameValidationError(got[i], want[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func sameValidationError(got, want ValidationError) bool {
+	return got.Field == want.Field &&
+		got.Value == want.Value &&
+		errorMessage(got.Reason) == errorMessage(want.Reason)
+}
+
+func errorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	return err.Error()
 }
