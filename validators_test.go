@@ -23,6 +23,31 @@ func validationFailures[V any](value V, validator Validator[V]) []ValidationErro
 	return []ValidationError{failure}
 }
 
+func TestCheck(t *testing.T) {
+	first := errors.New("first")
+	second := errors.New("second")
+	joined := errors.Join(first, second)
+	validator := Check(func(value int) error {
+		if value < 0 {
+			return joined
+		}
+
+		return nil
+	})
+
+	if err := validator(0); err != nil {
+		t.Fatalf("validator(0) error = %v, want nil", err)
+	}
+	if err := validator(-1); err != joined {
+		t.Fatalf("validator(-1) error = %v, want original joined error", err)
+	}
+
+	var nilCheck func(int) error
+	if validator := Check(nilCheck); validator != nil {
+		t.Fatal("Check(nil) returned a non-nil validator")
+	}
+}
+
 func TestNotNil(t *testing.T) {
 	wantFailure := ValidationError{Value: "<nil>", Reason: errors.New("must not be nil")}
 	assertValid := func(t *testing.T, failures []ValidationError) {
@@ -146,6 +171,120 @@ func TestNotZero(t *testing.T) {
 	}
 }
 
+func TestNumericSignValidators(t *testing.T) {
+	type count int
+
+	tests := []struct {
+		name       string
+		value      count
+		validator  Validator[count]
+		wantValue  string
+		wantReason string
+	}{
+		{name: "positive negative", value: -1, validator: Positive[count](), wantValue: "-1", wantReason: "must be positive"},
+		{name: "positive zero", value: 0, validator: Positive[count](), wantValue: "0", wantReason: "must be positive"},
+		{name: "positive positive", value: 1, validator: Positive[count]()},
+		{name: "non-negative negative", value: -1, validator: NonNegative[count](), wantValue: "-1", wantReason: "must be non-negative"},
+		{name: "non-negative zero", value: 0, validator: NonNegative[count]()},
+		{name: "non-negative positive", value: 1, validator: NonNegative[count]()},
+		{name: "negative negative", value: -1, validator: Negative[count]()},
+		{name: "negative zero", value: 0, validator: Negative[count](), wantValue: "0", wantReason: "must be negative"},
+		{name: "negative positive", value: 1, validator: Negative[count](), wantValue: "1", wantReason: "must be negative"},
+		{name: "non-positive negative", value: -1, validator: NonPositive[count]()},
+		{name: "non-positive zero", value: 0, validator: NonPositive[count]()},
+		{name: "non-positive positive", value: 1, validator: NonPositive[count](), wantValue: "1", wantReason: "must be non-positive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if test.wantReason == "" {
+				if len(failures) != 0 {
+					t.Fatalf("failures = %+v, want none", failures)
+				}
+
+				return
+			}
+
+			if len(failures) != 1 {
+				t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
+			}
+			want := ValidationError{Value: test.wantValue, Reason: errors.New(test.wantReason)}
+			if !sameValidationError(failures[0], want) {
+				t.Fatalf("failure = %+v, want %+v", failures[0], want)
+			}
+		})
+	}
+}
+
+func TestNumericSignValidatorsUnsigned(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     uint
+		validator Validator[uint]
+		wantFail  bool
+	}{
+		{name: "positive zero", value: 0, validator: Positive[uint](), wantFail: true},
+		{name: "positive nonzero", value: 1, validator: Positive[uint]()},
+		{name: "non-negative zero", value: 0, validator: NonNegative[uint]()},
+		{name: "non-negative nonzero", value: 1, validator: NonNegative[uint]()},
+		{name: "negative zero", value: 0, validator: Negative[uint](), wantFail: true},
+		{name: "negative nonzero", value: 1, validator: Negative[uint](), wantFail: true},
+		{name: "non-positive zero", value: 0, validator: NonPositive[uint]()},
+		{name: "non-positive nonzero", value: 1, validator: NonPositive[uint](), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+}
+
+func TestNumericSignValidatorsFloat(t *testing.T) {
+	negativeZero := math.Copysign(0, -1)
+	tests := []struct {
+		name      string
+		value     float64
+		validator Validator[float64]
+		wantFail  bool
+	}{
+		{name: "positive negative infinity", value: math.Inf(-1), validator: Positive[float64](), wantFail: true},
+		{name: "positive negative finite", value: -1.5, validator: Positive[float64](), wantFail: true},
+		{name: "positive negative zero", value: negativeZero, validator: Positive[float64](), wantFail: true},
+		{name: "positive positive finite", value: 1.5, validator: Positive[float64]()},
+		{name: "positive positive infinity", value: math.Inf(1), validator: Positive[float64]()},
+		{name: "non-negative negative infinity", value: math.Inf(-1), validator: NonNegative[float64](), wantFail: true},
+		{name: "non-negative negative finite", value: -1.5, validator: NonNegative[float64](), wantFail: true},
+		{name: "non-negative negative zero", value: negativeZero, validator: NonNegative[float64]()},
+		{name: "non-negative positive finite", value: 1.5, validator: NonNegative[float64]()},
+		{name: "non-negative positive infinity", value: math.Inf(1), validator: NonNegative[float64]()},
+		{name: "negative negative infinity", value: math.Inf(-1), validator: Negative[float64]()},
+		{name: "negative negative finite", value: -1.5, validator: Negative[float64]()},
+		{name: "negative negative zero", value: negativeZero, validator: Negative[float64](), wantFail: true},
+		{name: "negative positive finite", value: 1.5, validator: Negative[float64](), wantFail: true},
+		{name: "negative positive infinity", value: math.Inf(1), validator: Negative[float64](), wantFail: true},
+		{name: "non-positive negative infinity", value: math.Inf(-1), validator: NonPositive[float64]()},
+		{name: "non-positive negative finite", value: -1.5, validator: NonPositive[float64]()},
+		{name: "non-positive negative zero", value: negativeZero, validator: NonPositive[float64]()},
+		{name: "non-positive positive finite", value: 1.5, validator: NonPositive[float64](), wantFail: true},
+		{name: "non-positive positive infinity", value: math.Inf(1), validator: NonPositive[float64](), wantFail: true},
+		{name: "positive NaN", value: math.NaN(), validator: Positive[float64](), wantFail: true},
+		{name: "non-negative NaN", value: math.NaN(), validator: NonNegative[float64](), wantFail: true},
+		{name: "negative NaN", value: math.NaN(), validator: Negative[float64](), wantFail: true},
+		{name: "non-positive NaN", value: math.NaN(), validator: NonPositive[float64](), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+}
+
 func TestNotEmpty(t *testing.T) {
 	type name string
 
@@ -158,6 +297,37 @@ func TestNotEmpty(t *testing.T) {
 	}
 	if failures[0].Value != `""` || errorMessage(failures[0].Reason) != "must not be empty" {
 		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestNotBlank(t *testing.T) {
+	type name string
+
+	tests := []struct {
+		name     string
+		value    name
+		wantFail bool
+	}{
+		{name: "empty", value: "", wantFail: true},
+		{name: "space", value: " ", wantFail: true},
+		{name: "ASCII whitespace", value: "\t\n\r", wantFail: true},
+		{name: "Unicode whitespace", value: "\u2003", wantFail: true},
+		{name: "text", value: "service"},
+		{name: "surrounding whitespace", value: "\t service \u2003"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, NotBlank[name]())
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	failures := validationFailures(name(" \t"), NotBlank[name]())
+	want := ValidationError{Value: `" \t"`, Reason: errors.New("must not be blank")}
+	if len(failures) != 1 || !sameValidationError(failures[0], want) {
+		t.Fatalf("failures = %+v, want [%+v]", failures, want)
 	}
 }
 
@@ -189,11 +359,101 @@ func TestMinAndMax(t *testing.T) {
 	if failures := validationFailures("a", Min("b")); len(failures) != 1 {
 		t.Fatalf("ordered string failure count = %d, want 1", len(failures))
 	}
-	if failures := validationFailures(math.NaN(), Min(0.0)); len(failures) != 0 {
-		t.Fatalf("NaN Min failures = %+v", failures)
+
+	minFailure := validationFailures(count(1), Min(count(2)))
+	wantMinFailure := ValidationError{Value: "1", Reason: errors.New("must be greater than or equal to 2")}
+	if len(minFailure) != 1 || !sameValidationError(minFailure[0], wantMinFailure) {
+		t.Fatalf("Min failure = %+v, want [%+v]", minFailure, wantMinFailure)
 	}
-	if failures := validationFailures(math.NaN(), Max(0.0)); len(failures) != 0 {
-		t.Fatalf("NaN Max failures = %+v", failures)
+	maxFailure := validationFailures(count(3), Max(count(2)))
+	wantMaxFailure := ValidationError{Value: "3", Reason: errors.New("must be less than or equal to 2")}
+	if len(maxFailure) != 1 || !sameValidationError(maxFailure[0], wantMaxFailure) {
+		t.Fatalf("Max failure = %+v, want [%+v]", maxFailure, wantMaxFailure)
+	}
+
+	floatTests := []struct {
+		name       string
+		value      float64
+		validator  Validator[float64]
+		wantValue  string
+		wantReason string
+	}{
+		{name: "Min NaN value", value: math.NaN(), validator: Min(0.0), wantValue: "NaN", wantReason: "must be greater than or equal to 0"},
+		{name: "Min NaN bound", value: 0, validator: Min(math.NaN()), wantValue: "0", wantReason: "must be greater than or equal to NaN"},
+		{name: "Max NaN value", value: math.NaN(), validator: Max(0.0), wantValue: "NaN", wantReason: "must be less than or equal to 0"},
+		{name: "Max NaN bound", value: 0, validator: Max(math.NaN()), wantValue: "0", wantReason: "must be less than or equal to NaN"},
+	}
+	for _, test := range floatTests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			want := ValidationError{Value: test.wantValue, Reason: errors.New(test.wantReason)}
+			if len(failures) != 1 || !sameValidationError(failures[0], want) {
+				t.Fatalf("failures = %+v, want [%+v]", failures, want)
+			}
+		})
+	}
+}
+
+func TestBetween(t *testing.T) {
+	type count int
+
+	tests := []struct {
+		name     string
+		value    count
+		minimum  count
+		maximum  count
+		wantFail bool
+	}{
+		{name: "below", value: 0, minimum: 1, maximum: 3, wantFail: true},
+		{name: "minimum", value: 1, minimum: 1, maximum: 3},
+		{name: "within", value: 2, minimum: 1, maximum: 3},
+		{name: "maximum", value: 3, minimum: 1, maximum: 3},
+		{name: "above", value: 4, minimum: 1, maximum: 3, wantFail: true},
+		{name: "reversed below", value: 0, minimum: 3, maximum: 1, wantFail: true},
+		{name: "reversed within", value: 2, minimum: 3, maximum: 1, wantFail: true},
+		{name: "reversed above", value: 4, minimum: 3, maximum: 1, wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, Between(test.minimum, test.maximum))
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	if failures := validationFailures("c", Between("b", "d")); len(failures) != 0 {
+		t.Fatalf("ordered string failures = %+v, want none", failures)
+	}
+	if failures := validationFailures(math.Inf(-1), Between(math.Inf(-1), math.Inf(1))); len(failures) != 0 {
+		t.Fatalf("negative infinity failures = %+v, want none", failures)
+	}
+	if failures := validationFailures(math.Inf(1), Between(math.Inf(-1), math.Inf(1))); len(failures) != 0 {
+		t.Fatalf("positive infinity failures = %+v, want none", failures)
+	}
+
+	floatTests := []struct {
+		name    string
+		value   float64
+		minimum float64
+		maximum float64
+	}{
+		{name: "NaN value", value: math.NaN(), minimum: 0, maximum: 1},
+		{name: "NaN minimum", value: 0.5, minimum: math.NaN(), maximum: 1},
+		{name: "NaN maximum", value: 0.5, minimum: 0, maximum: math.NaN()},
+	}
+	for _, test := range floatTests {
+		t.Run(test.name, func(t *testing.T) {
+			if failures := validationFailures(test.value, Between(test.minimum, test.maximum)); len(failures) != 1 {
+				t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
+			}
+		})
+	}
+
+	failures := validationFailures(count(4), Between(count(1), count(3)))
+	want := ValidationError{Value: "4", Reason: errors.New("must be between 1 and 3")}
+	if len(failures) != 1 || !sameValidationError(failures[0], want) {
+		t.Fatalf("failures = %+v, want [%+v]", failures, want)
 	}
 }
 
@@ -261,6 +521,36 @@ func TestOneOf(t *testing.T) {
 	failures := validationFailures(mode("other"), OneOf(mode("fast"), mode("safe")))
 	if failures[0].Value != "other" || errorMessage(failures[0].Reason) != "must be one of [fast safe]" {
 		t.Fatalf("failure = %+v", failures[0])
+	}
+}
+
+func TestNotOneOf(t *testing.T) {
+	type mode string
+
+	tests := []struct {
+		name       string
+		value      mode
+		disallowed []mode
+		wantFail   bool
+	}{
+		{name: "allowed", value: "other", disallowed: []mode{"fast", "safe"}},
+		{name: "rejected", value: "fast", disallowed: []mode{"fast", "safe"}, wantFail: true},
+		{name: "duplicate disallowed", value: "fast", disallowed: []mode{"fast", "fast"}, wantFail: true},
+		{name: "empty disallowed set", value: "fast"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, NotOneOf(test.disallowed...))
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+
+	failures := validationFailures(mode("fast"), NotOneOf(mode("fast"), mode("safe")))
+	want := ValidationError{Value: "fast", Reason: errors.New("must not be one of [fast safe]")}
+	if len(failures) != 1 || !sameValidationError(failures[0], want) {
+		t.Fatalf("failures = %+v, want [%+v]", failures, want)
 	}
 }
 
