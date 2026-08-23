@@ -183,12 +183,16 @@ return errors.Join(
 
 ### Built-in validators
 
-The package includes `NotNil`, `NotNilPtr`, `NotZero`, `NotEmpty`, `Min`, `Max`,
-`MinLen`, `MaxLen`, and `OneOf`. `NotNil[V]` is the general-purpose validator: it
-rejects nil pointers, interfaces (including typed nils), slices, maps, functions,
-and channels, while values of non-nilable types always pass. `NotNilPtr[T]` is the
-reflection-free alternative for callers that want stronger pointer type intent.
-String length is measured in bytes, matching Go's `len`.
+The package includes `NotNil`, `NotNilPtr`, `NotZero`, `Positive`, `NonNegative`,
+`Negative`, `NonPositive`, `NotEmpty`, `Min`, `Max`, `MinLen`, `MaxLen`, and
+`OneOf`. `Positive`, `NonNegative`, `Negative`, and `NonPositive` validate ordered
+numeric values relative to zero. They support named integer, unsigned integer,
+and floating-point types; `NaN` fails every sign validator. `NotNil[V]` is the
+general-purpose validator: it rejects nil pointers, interfaces (including typed
+nils), slices, maps, functions, and channels, while values of non-nilable types
+always pass. `NotNilPtr[T]` is the reflection-free alternative for callers that
+want stronger pointer type intent. String length is measured in bytes, matching
+Go's `len`.
 
 Slices use `SliceNotEmpty`, `SliceMinLen`, and `SliceMaxLen`; maps use
 `MapNotEmpty`, `MapMinLen`, and `MapMaxLen`. These helpers are statically typed so

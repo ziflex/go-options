@@ -146,6 +146,120 @@ func TestNotZero(t *testing.T) {
 	}
 }
 
+func TestNumericSignValidators(t *testing.T) {
+	type count int
+
+	tests := []struct {
+		name       string
+		value      count
+		validator  Validator[count]
+		wantValue  string
+		wantReason string
+	}{
+		{name: "positive negative", value: -1, validator: Positive[count](), wantValue: "-1", wantReason: "must be positive"},
+		{name: "positive zero", value: 0, validator: Positive[count](), wantValue: "0", wantReason: "must be positive"},
+		{name: "positive positive", value: 1, validator: Positive[count]()},
+		{name: "non-negative negative", value: -1, validator: NonNegative[count](), wantValue: "-1", wantReason: "must be non-negative"},
+		{name: "non-negative zero", value: 0, validator: NonNegative[count]()},
+		{name: "non-negative positive", value: 1, validator: NonNegative[count]()},
+		{name: "negative negative", value: -1, validator: Negative[count]()},
+		{name: "negative zero", value: 0, validator: Negative[count](), wantValue: "0", wantReason: "must be negative"},
+		{name: "negative positive", value: 1, validator: Negative[count](), wantValue: "1", wantReason: "must be negative"},
+		{name: "non-positive negative", value: -1, validator: NonPositive[count]()},
+		{name: "non-positive zero", value: 0, validator: NonPositive[count]()},
+		{name: "non-positive positive", value: 1, validator: NonPositive[count](), wantValue: "1", wantReason: "must be non-positive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if test.wantReason == "" {
+				if len(failures) != 0 {
+					t.Fatalf("failures = %+v, want none", failures)
+				}
+
+				return
+			}
+
+			if len(failures) != 1 {
+				t.Fatalf("failure count = %d, want 1: %+v", len(failures), failures)
+			}
+			want := ValidationError{Value: test.wantValue, Reason: errors.New(test.wantReason)}
+			if !sameValidationError(failures[0], want) {
+				t.Fatalf("failure = %+v, want %+v", failures[0], want)
+			}
+		})
+	}
+}
+
+func TestNumericSignValidatorsUnsigned(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     uint
+		validator Validator[uint]
+		wantFail  bool
+	}{
+		{name: "positive zero", value: 0, validator: Positive[uint](), wantFail: true},
+		{name: "positive nonzero", value: 1, validator: Positive[uint]()},
+		{name: "non-negative zero", value: 0, validator: NonNegative[uint]()},
+		{name: "non-negative nonzero", value: 1, validator: NonNegative[uint]()},
+		{name: "negative zero", value: 0, validator: Negative[uint](), wantFail: true},
+		{name: "negative nonzero", value: 1, validator: Negative[uint](), wantFail: true},
+		{name: "non-positive zero", value: 0, validator: NonPositive[uint]()},
+		{name: "non-positive nonzero", value: 1, validator: NonPositive[uint](), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+}
+
+func TestNumericSignValidatorsFloat(t *testing.T) {
+	negativeZero := math.Copysign(0, -1)
+	tests := []struct {
+		name      string
+		value     float64
+		validator Validator[float64]
+		wantFail  bool
+	}{
+		{name: "positive negative infinity", value: math.Inf(-1), validator: Positive[float64](), wantFail: true},
+		{name: "positive negative finite", value: -1.5, validator: Positive[float64](), wantFail: true},
+		{name: "positive negative zero", value: negativeZero, validator: Positive[float64](), wantFail: true},
+		{name: "positive positive finite", value: 1.5, validator: Positive[float64]()},
+		{name: "positive positive infinity", value: math.Inf(1), validator: Positive[float64]()},
+		{name: "non-negative negative infinity", value: math.Inf(-1), validator: NonNegative[float64](), wantFail: true},
+		{name: "non-negative negative finite", value: -1.5, validator: NonNegative[float64](), wantFail: true},
+		{name: "non-negative negative zero", value: negativeZero, validator: NonNegative[float64]()},
+		{name: "non-negative positive finite", value: 1.5, validator: NonNegative[float64]()},
+		{name: "non-negative positive infinity", value: math.Inf(1), validator: NonNegative[float64]()},
+		{name: "negative negative infinity", value: math.Inf(-1), validator: Negative[float64]()},
+		{name: "negative negative finite", value: -1.5, validator: Negative[float64]()},
+		{name: "negative negative zero", value: negativeZero, validator: Negative[float64](), wantFail: true},
+		{name: "negative positive finite", value: 1.5, validator: Negative[float64](), wantFail: true},
+		{name: "negative positive infinity", value: math.Inf(1), validator: Negative[float64](), wantFail: true},
+		{name: "non-positive negative infinity", value: math.Inf(-1), validator: NonPositive[float64]()},
+		{name: "non-positive negative finite", value: -1.5, validator: NonPositive[float64]()},
+		{name: "non-positive negative zero", value: negativeZero, validator: NonPositive[float64]()},
+		{name: "non-positive positive finite", value: 1.5, validator: NonPositive[float64](), wantFail: true},
+		{name: "non-positive positive infinity", value: math.Inf(1), validator: NonPositive[float64](), wantFail: true},
+		{name: "positive NaN", value: math.NaN(), validator: Positive[float64](), wantFail: true},
+		{name: "non-negative NaN", value: math.NaN(), validator: NonNegative[float64](), wantFail: true},
+		{name: "negative NaN", value: math.NaN(), validator: Negative[float64](), wantFail: true},
+		{name: "non-positive NaN", value: math.NaN(), validator: NonPositive[float64](), wantFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failures := validationFailures(test.value, test.validator)
+			if got := len(failures) == 1; got != test.wantFail {
+				t.Fatalf("failures = %+v, wantFail = %v", failures, test.wantFail)
+			}
+		})
+	}
+}
+
 func TestNotEmpty(t *testing.T) {
 	type name string
 

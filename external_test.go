@@ -19,6 +19,21 @@ func TestCollectionValidatorTypeInference(t *testing.T) {
 	}
 }
 
+func TestNumericSignValidatorTypes(t *testing.T) {
+	type count int64
+	type ratio float32
+	type size uint
+
+	var positive options.Validator[count] = options.Positive[count]()
+	var nonNegative options.Validator[ratio] = options.NonNegative[ratio]()
+	var negative options.Validator[count] = options.Negative[count]()
+	var nonPositive options.Validator[size] = options.NonPositive[size]()
+
+	if positive == nil || nonNegative == nil || negative == nil || nonPositive == nil {
+		t.Fatal("expected numeric sign validators")
+	}
+}
+
 func TestCustomValidatorContract(t *testing.T) {
 	var validator options.Validator[int] = func(value int) error {
 		if value < 0 {

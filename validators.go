@@ -13,6 +13,12 @@ import (
 // value as read-only. Use errors.Join to return multiple failures.
 type Validator[V any] func(V) error
 
+type orderedNumber interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
+		~float32 | ~float64
+}
+
 // NotNil rejects nil values, including typed nil values stored in interfaces.
 // Values whose type cannot be nil always pass validation.
 func NotNil[V any]() Validator[V] {
@@ -66,6 +72,70 @@ func NotZero[V comparable]() Validator[V] {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
 				Reason: errors.New("must not be zero"),
+			}
+		}
+
+		return nil
+	}
+}
+
+// Positive rejects values that are not greater than zero.
+func Positive[V orderedNumber]() Validator[V] {
+	return func(value V) error {
+		var zero V
+
+		if !(value > zero) {
+			return ValidationError{
+				Value:  fmt.Sprint(value),
+				Reason: errors.New("must be positive"),
+			}
+		}
+
+		return nil
+	}
+}
+
+// NonNegative rejects values that are not greater than or equal to zero.
+func NonNegative[V orderedNumber]() Validator[V] {
+	return func(value V) error {
+		var zero V
+
+		if !(value >= zero) {
+			return ValidationError{
+				Value:  fmt.Sprint(value),
+				Reason: errors.New("must be non-negative"),
+			}
+		}
+
+		return nil
+	}
+}
+
+// Negative rejects values that are not less than zero.
+func Negative[V orderedNumber]() Validator[V] {
+	return func(value V) error {
+		var zero V
+
+		if !(value < zero) {
+			return ValidationError{
+				Value:  fmt.Sprint(value),
+				Reason: errors.New("must be negative"),
+			}
+		}
+
+		return nil
+	}
+}
+
+// NonPositive rejects values that are not less than or equal to zero.
+func NonPositive[V orderedNumber]() Validator[V] {
+	return func(value V) error {
+		var zero V
+
+		if !(value <= zero) {
+			return ValidationError{
+				Value:  fmt.Sprint(value),
+				Reason: errors.New("must be non-positive"),
 			}
 		}
 
