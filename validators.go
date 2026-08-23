@@ -6,17 +6,25 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
-// Validator validates a value. It returns nil when the value is valid and an
-// error describing why validation failed otherwise. Validators should treat the
-// value as read-only. Use errors.Join to return multiple failures.
-type Validator[V any] func(V) error
+type (
+	// Validator validates a value. It returns nil when the value is valid and an
+	// error describing why validation failed otherwise. Validators should treat the
+	// value as read-only. Use errors.Join to return multiple failures.
+	Validator[V any] func(V) error
 
-type orderedNumber interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
-		~float32 | ~float64
+	orderedNumber interface {
+		~int | ~int8 | ~int16 | ~int32 | ~int64 |
+			~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
+			~float32 | ~float64
+	}
+)
+
+// Check adapts check into a Validator while preserving its returned error.
+func Check[V any](check func(V) error) Validator[V] {
+	return check
 }
 
 // NotNil rejects nil values, including typed nil values stored in interfaces.
@@ -157,6 +165,20 @@ func NotEmpty[S ~string]() Validator[S] {
 	}
 }
 
+// NotBlank rejects empty strings and strings containing only Unicode whitespace.
+func NotBlank[S ~string]() Validator[S] {
+	return func(value S) error {
+		if strings.TrimSpace(string(value)) == "" {
+			return ValidationError{
+				Value:  strconv.Quote(string(value)),
+				Reason: errors.New("must not be blank"),
+			}
+		}
+
+		return nil
+	}
+}
+
 // Min rejects values smaller than minimum.
 func Min[V cmp.Ordered](minimum V) Validator[V] {
 	return func(value V) error {
@@ -178,6 +200,20 @@ func Max[V cmp.Ordered](maximum V) Validator[V] {
 			return ValidationError{
 				Value:  fmt.Sprint(value),
 				Reason: fmt.Errorf("must be less than or equal to %v", maximum),
+			}
+		}
+
+		return nil
+	}
+}
+
+// Between rejects values outside the inclusive minimum and maximum bounds.
+func Between[V cmp.Ordered](minimum, maximum V) Validator[V] {
+	return func(value V) error {
+		if !(value >= minimum && value <= maximum) {
+			return ValidationError{
+				Value:  fmt.Sprint(value),
+				Reason: fmt.Errorf("must be between %v and %v", minimum, maximum),
 			}
 		}
 
@@ -213,6 +249,23 @@ func OneOf[V comparable](allowed ...V) Validator[V] {
 			Value:  fmt.Sprint(value),
 			Reason: fmt.Errorf("must be one of %v", allowed),
 		}
+	}
+}
+
+// NotOneOf rejects values equal to one of disallowed. An empty disallowed set
+// accepts every value.
+func NotOneOf[V comparable](disallowed ...V) Validator[V] {
+	return func(value V) error {
+		for _, candidate := range disallowed {
+			if value == candidate {
+				return ValidationError{
+					Value:  fmt.Sprint(value),
+					Reason: fmt.Errorf("must not be one of %v", disallowed),
+				}
+			}
+		}
+
+		return nil
 	}
 }
 

@@ -92,6 +92,23 @@ func ExampleValidator() {
 	// 4 <nil>
 }
 
+func ExampleCheck() {
+	even := options.Check(func(value int) error {
+		if value%2 != 0 {
+			return errors.New("must be even")
+		}
+
+		return nil
+	})
+
+	fmt.Println(even(4))
+	fmt.Println(even(3))
+
+	// Output:
+	// <nil>
+	// must be even
+}
+
 func ExampleNotNil() {
 	type resource struct{}
 	type config struct {

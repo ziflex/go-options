@@ -34,6 +34,21 @@ func TestNumericSignValidatorTypes(t *testing.T) {
 	}
 }
 
+func TestCheckTypeInference(t *testing.T) {
+	type count int
+
+	var validator options.Validator[count] = options.Check(func(value count) error {
+		if value < 0 {
+			return errors.New("must not be negative")
+		}
+
+		return nil
+	})
+	if err := validator(1); err != nil {
+		t.Fatalf("validator(1) error = %v", err)
+	}
+}
+
 func TestCustomValidatorContract(t *testing.T) {
 	var validator options.Validator[int] = func(value int) error {
 		if value < 0 {

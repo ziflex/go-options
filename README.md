@@ -26,6 +26,8 @@ go get github.com/ziflex/go-options
 
 - `Apply(opts...)` creates a zero-value configuration and applies the options.
 - `ApplyTo(initial, opts...)` applies options to an existing configuration.
+- `Check(check)` adapts an error-returning function into a validator and infers
+  its value type.
 - `New(setter)` creates an option builder and infers its configuration and value types from the setter.
 
 `Apply` invokes every option and combines returned failures with `errors.Join`.
@@ -147,11 +149,12 @@ func WithNamedWorkers(workers int) options.Option[Config] {
 
 ### Custom validation
 
-Use `Validator` for application-specific rules. Return `nil` when the value is
-valid or an error describing why it is invalid:
+Use `Check` for application-specific rules. It infers the value type from the
+function parameter; return `nil` when the value is valid or an error describing
+why it is invalid:
 
 ```go
-var Even = options.Validator[int](func(value int) error {
+var Even = options.Check(func(value int) error {
 	if value%2 != 0 {
 		return options.ValidationError{
 			Reason: errors.New("must be even"),
@@ -172,6 +175,9 @@ func WithEvenWorkers(workers int) options.Option[Config] {
 }
 ```
 
+Explicit conversion with `options.Validator[int](func(value int) error { ... })`
+remains available when type inference is not needed.
+
 Return `errors.Join` when one validator needs to describe multiple failures:
 
 ```go
@@ -183,21 +189,33 @@ return errors.Join(
 
 ### Built-in validators
 
-The package includes `NotNil`, `NotNilPtr`, `NotZero`, `Positive`, `NonNegative`,
-`Negative`, `NonPositive`, `NotEmpty`, `Min`, `Max`, `MinLen`, `MaxLen`, and
-`OneOf`. `Positive`, `NonNegative`, `Negative`, and `NonPositive` validate ordered
-numeric values relative to zero. They support named integer, unsigned integer,
-and floating-point types; `NaN` fails every sign validator. `NotNil[V]` is the
-general-purpose validator: it rejects nil pointers, interfaces (including typed
-nils), slices, maps, functions, and channels, while values of non-nilable types
-always pass. `NotNilPtr[T]` is the reflection-free alternative for callers that
-want stronger pointer type intent. String length is measured in bytes, matching
-Go's `len`.
+| Validator | Applies to | Behavior |
+| --- | --- | --- |
+| `NotNil[V]()` | Any value | Rejects nil pointers, interfaces (including typed nils), slices, maps, functions, channels, and unsafe pointers. Non-nilable types always pass. |
+| `NotNilPtr[V]()` | Pointers | Reflection-free validator that rejects nil pointers. |
+| `NotZero[V]()` | Comparable values | Rejects the zero value of `V`. |
+| `Positive[V]()` | Ordered numeric values | Accepts values `> 0`; `NaN` fails. Supports named signed, unsigned, and floating-point types. |
+| `NonNegative[V]()` | Ordered numeric values | Accepts values `>= 0`; `NaN` fails. Supports named signed, unsigned, and floating-point types. |
+| `Negative[V]()` | Ordered numeric values | Accepts values `< 0`; `NaN` fails. Supports named signed, unsigned, and floating-point types. |
+| `NonPositive[V]()` | Ordered numeric values | Accepts values `<= 0`; `NaN` fails. Supports named signed, unsigned, and floating-point types. |
+| `NotEmpty[S]()` | Strings | Rejects the empty string. |
+| `NotBlank[S]()` | Strings | Rejects empty strings and strings containing only Unicode whitespace. |
+| `Min[V](minimum)` | Ordered values | Accepts values `>= minimum`; `NaN` passes. |
+| `Max[V](maximum)` | Ordered values | Accepts values `<= maximum`; `NaN` passes. |
+| `Between[V](minimum, maximum)` | Ordered values | Accepts values within the inclusive bounds. `NaN` fails, and reversed bounds form an empty interval. |
+| `MinLen[S](minimum)` | Strings | Accepts strings whose byte length is at least `minimum`. |
+| `MaxLen[S](maximum)` | Strings | Accepts strings whose byte length is at most `maximum`. |
+| `SliceNotEmpty[S]()` | Slices | Rejects nil and empty slices. |
+| `SliceMinLen[S](minimum)` | Slices | Accepts slices with at least `minimum` elements; nil slices have length zero. |
+| `SliceMaxLen[S](maximum)` | Slices | Accepts slices with at most `maximum` elements; nil slices have length zero. |
+| `MapNotEmpty[M]()` | Maps | Rejects nil and empty maps. |
+| `MapMinLen[M](minimum)` | Maps | Accepts maps with at least `minimum` entries; nil maps have length zero. |
+| `MapMaxLen[M](maximum)` | Maps | Accepts maps with at most `maximum` entries; nil maps have length zero. |
+| `OneOf[V](allowed...)` | Comparable values | Accepts values in the allowed set; an empty set rejects every value. |
+| `NotOneOf[V](disallowed...)` | Comparable values | Accepts values outside the disallowed set; an empty set accepts every value. |
 
-Slices use `SliceNotEmpty`, `SliceMinLen`, and `SliceMaxLen`; maps use
-`MapNotEmpty`, `MapMinLen`, and `MapMaxLen`. These helpers are statically typed so
-unsupported kinds fail at compile time. The first type argument is sufficient for
-named collection types:
+Collection validators are statically typed so unsupported kinds fail at compile
+time. The first type argument is sufficient for named collection types:
 
 ```go
 type Names []string
