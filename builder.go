@@ -1,6 +1,9 @@
 package options
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Builder describes an option for configuration type C with value type V.
 // Create builders with New.
@@ -25,8 +28,8 @@ func (b Builder[C, V]) Value(value V) Builder[C, V] {
 	return b
 }
 
-// Named adds field context to validation failures that do not already identify
-// a field. Repeated calls replace the previous name.
+// Named sets the option name used when Build wraps validation failures.
+// Repeated calls replace the previous name.
 func (b Builder[C, V]) Named(name string) Builder[C, V] {
 	b.name = name
 
@@ -65,7 +68,11 @@ func (b Builder[C, V]) Build() Option[C] {
 			}
 
 			if err := validator(value); err != nil {
-				errs = append(errs, normalizeValidationError(name, err))
+				errs = append(errs, ValidationError{
+					Field:  name,
+					Value:  fmt.Sprint(value),
+					Reason: err,
+				})
 			}
 		}
 

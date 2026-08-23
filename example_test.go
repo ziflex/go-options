@@ -52,7 +52,13 @@ func ExampleBuilder_Named() {
 	).
 		Value(0).
 		Named("workers").
-		Validators(options.Min(1), options.Max(32)).
+		Validators(func(value int) error {
+			if value < 1 {
+				return errors.New("must be greater than or equal to 1")
+			}
+
+			return nil
+		}).
 		Build()
 
 	_, err := options.Apply(option)
@@ -105,7 +111,7 @@ func ExampleNotNil() {
 	fmt.Println(err)
 
 	// Output:
-	// must not be nil: value=<nil>
+	// must not be nil: value=<nil>: value=<nil>
 }
 
 func ExampleNotNilPtr() {
@@ -127,7 +133,7 @@ func ExampleNotNilPtr() {
 	fmt.Println(err)
 
 	// Output:
-	// cannot be nil
+	// cannot be nil: value=<nil>
 }
 
 func ExampleApplyTo() {

@@ -45,7 +45,8 @@ Option construction has five stages:
 
 - `New` defines how the option modifies its configuration.
 - `Value` binds the required option value, including an explicit zero value.
-- `Named` optionally adds field context to validation failures.
+- `Named` optionally sets the option name used when `Build` wraps validation
+  failures.
 - `Validators` optionally appends validators in execution order.
 - `Build` produces the final `Option`.
 
@@ -128,8 +129,9 @@ A custom option with independent failures can return
 
 ### Named diagnostics
 
-Validators do not require a field name. Use `Named` only when the additional
-context is useful:
+Validators do not require a field name. `Named` identifies the option being
+configured; `Build` places that name on its validation wrapper without changing
+the error returned by the validator:
 
 ```go
 func WithNamedWorkers(workers int) options.Option[Config] {

@@ -10,7 +10,17 @@ import (
 )
 
 func validationFailures[V any](value V, validator Validator[V]) []ValidationError {
-	return validationErrors(validator(value))
+	err := validator(value)
+	if err == nil {
+		return nil
+	}
+
+	var failure ValidationError
+	if !errors.As(err, &failure) {
+		return nil
+	}
+
+	return []ValidationError{failure}
 }
 
 func TestNotNil(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -136,11 +135,13 @@ func TestBuilder(t *testing.T) {
 
 	t.Run("Validators appends and preserves order", func(t *testing.T) {
 		var order []int
+		firstFailure := errors.New("first")
+		thirdFailure := errors.New("third")
 		option := New(setConstructorValue).
 			Value(5).
 			Validators(func(_ int) error {
 				order = append(order, 1)
-				return ValidationError{Reason: errors.New("first")}
+				return firstFailure
 			}).
 			Validators(
 				nil,
@@ -150,7 +151,7 @@ func TestBuilder(t *testing.T) {
 				},
 				func(_ int) error {
 					order = append(order, 3)
-					return ValidationError{Reason: errors.New("third")}
+					return thirdFailure
 				},
 			).
 			Build()
@@ -165,24 +166,19 @@ func TestBuilder(t *testing.T) {
 		if config.value != 0 {
 			t.Fatalf("config.value = %d, want zero", config.value)
 		}
-
-		applyErrors := err.(interface{ Unwrap() []error }).Unwrap()
-		if len(applyErrors) != 1 {
-			t.Fatalf("Apply() error count = %d, want one option error", len(applyErrors))
-		}
-		validatorErrors := applyErrors[0].(interface{ Unwrap() []error }).Unwrap()
-		if len(validatorErrors) != 2 {
-			t.Fatalf("validator error count = %d, want 2", len(validatorErrors))
+		if !errors.Is(err, firstFailure) || !errors.Is(err, thirdFailure) {
+			t.Fatalf("Apply() error = %v, want both validator failures", err)
 		}
 	})
 
-	t.Run("Named enriches unnamed failure", func(t *testing.T) {
+	t.Run("Named wraps ordinary validator error", func(t *testing.T) {
+		failure := errors.New("invalid")
 		_, err := Apply(
 			New(setConstructorValue).
 				Value(0).
 				Named("old").
 				Named("value").
-				Validators(Min(1)).
+				Validators(func(int) error { return failure }).
 				Build(),
 		)
 		if err == nil {
@@ -190,78 +186,78 @@ func TestBuilder(t *testing.T) {
 		}
 
 		var validationError ValidationError
-		if !errors.As(err, &validationError) || validationError.Field != "value" {
-			t.Fatalf("Apply() error = %v, want field value", err)
-		}
-	})
-
-	t.Run("Named preserves validator field", func(t *testing.T) {
-		_, err := Apply(
-			New(setConstructorValue).
-				Value(0).
-				Named("outer").
-				Validators(func(_ int) error {
-					return ValidationError{Field: "inner", Reason: errors.New("invalid")}
-				}).
-				Build(),
-		)
-		if err == nil {
-			t.Fatal("Apply() error = nil, want validation error")
-		}
-
-		var validationError ValidationError
-		if !errors.As(err, &validationError) || validationError.Field != "inner" {
-			t.Fatalf("Apply() error = %v, want field inner", err)
-		}
-	})
-
-	t.Run("Named enriches pointer failure without mutating it", func(t *testing.T) {
-		failure := &ValidationError{Reason: errors.New("invalid")}
-		_, err := Apply(
-			New(setConstructorValue).
-				Value(0).
-				Named("outer").
-				Validators(func(_ int) error { return failure }).
-				Build(),
-		)
-		if err == nil {
-			t.Fatal("Apply() error = nil, want validation error")
-		}
-
-		var validationError *ValidationError
-		if !errors.As(err, &validationError) || validationError.Field != "outer" {
-			t.Fatalf("Apply() error = %v, want pointer failure with field outer", err)
-		}
-		if validationError == failure || failure.Field != "" {
-			t.Fatalf("validator failure was mutated: original = %+v, returned = %+v", failure, validationError)
-		}
-	})
-
-	t.Run("typed nil validation error is normalized safely", func(t *testing.T) {
-		var failure *ValidationError
-		_, err := Apply(
-			New(setConstructorValue).
-				Value(0).
-				Named("value").
-				Validators(func(_ int) error { return failure }).
-				Build(),
-		)
-		if err == nil {
-			t.Fatal("Apply() error = nil, want validation error")
-		}
-
-		var validationError ValidationError
-		want := ValidationError{Field: "value", Reason: errors.New("<nil>")}
+		want := ValidationError{Field: "value", Value: "0", Reason: failure}
 		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
 			t.Fatalf("Apply() error = %v, want %+v", err, want)
 		}
+		if validationError.Reason != failure || !errors.Is(err, failure) {
+			t.Fatalf("Apply() error = %v, want original validator failure", err)
+		}
 	})
 
-	t.Run("builder without Named leaves failure unnamed", func(t *testing.T) {
+	t.Run("Named preserves explicit validator field", func(t *testing.T) {
+		reason := errors.New("invalid")
+		failure := &ValidationError{
+			Field:  "inner",
+			Value:  "inner-value",
+			Reason: reason,
+		}
 		_, err := Apply(
 			New(setConstructorValue).
 				Value(0).
-				Validators(Min(1)).
+				Named("outer").
+				Validators(func(_ int) error { return failure }).
+				Build(),
+		)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want validation error")
+		}
+
+		var outer ValidationError
+		wantOuter := ValidationError{Field: "outer", Value: "0", Reason: failure}
+		if !errors.As(err, &outer) || !sameValidationError(outer, wantOuter) {
+			t.Fatalf("Apply() error = %v, want outer failure %+v", err, wantOuter)
+		}
+
+		var inner *ValidationError
+		if !errors.As(outer.Reason, &inner) || inner != failure {
+			t.Fatalf("outer reason = %v, want original nested failure", outer.Reason)
+		}
+		wantInner := ValidationError{Field: "inner", Value: "inner-value", Reason: reason}
+		if !sameValidationError(*failure, wantInner) {
+			t.Fatalf("validator failure = %+v, want unchanged %+v", failure, wantInner)
+		}
+	})
+
+	t.Run("Named preserves unnamed validator field", func(t *testing.T) {
+		reason := errors.New("invalid")
+		failure := &ValidationError{Value: "inner-value", Reason: reason}
+		_, err := Apply(
+			New(setConstructorValue).
+				Value(0).
+				Named("outer").
+				Validators(func(_ int) error { return failure }).
+				Build(),
+		)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want validation error")
+		}
+
+		var outer ValidationError
+		if !errors.As(err, &outer) || outer.Field != "outer" || outer.Reason != failure {
+			t.Fatalf("Apply() error = %v, want outer failure preserving cause", err)
+		}
+		if failure.Field != "" || failure.Value != "inner-value" || failure.Reason != reason {
+			t.Fatalf("validator failure was mutated: %+v", failure)
+		}
+	})
+
+	t.Run("builder without Named wraps failure without a field", func(t *testing.T) {
+		failure := errors.New("invalid")
+		_, err := Apply(
+			New(setConstructorValue).
+				Value(0).
+				Validators(func(_ int) error { return failure }).
 				Build(),
 		)
 		if err == nil {
@@ -269,8 +265,9 @@ func TestBuilder(t *testing.T) {
 		}
 
 		var validationError ValidationError
-		if !errors.As(err, &validationError) || validationError.Field != "" {
-			t.Fatalf("Apply() error = %v, want unnamed failure", err)
+		want := ValidationError{Value: "0", Reason: failure}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
+			t.Fatalf("Apply() error = %v, want %+v", err, want)
 		}
 	})
 
@@ -354,32 +351,24 @@ func TestBuilder(t *testing.T) {
 		}
 	})
 
-	t.Run("normalizes nested joined and wrapped errors", func(t *testing.T) {
+	t.Run("preserves nested joined and wrapped errors", func(t *testing.T) {
 		setterCalls := 0
-		plainFailure := errors.New("plain")
+		firstFailure := errors.New("first")
+		secondFailure := errors.New("second")
+		inner := &ValidationError{
+			Field:  "inner",
+			Value:  "inner-value",
+			Reason: firstFailure,
+		}
+		joined := errors.Join(inner, secondFailure)
+		wrapped := fmt.Errorf("validator context: %w", joined)
 		option := New(func(config *constructorConfig, value int) {
 			setterCalls++
 			config.value = value
 		}).
 			Value(5).
 			Named("outer").
-			Validators(func(int) error {
-				return fmt.Errorf("validator context: %w", errors.Join(
-					ValidationError{Value: "first-value", Reason: errors.New("first")},
-					fmt.Errorf("validation context: %w", errors.Join(
-						&ValidationError{
-							Field:  "inner",
-							Value:  "second-value",
-							Reason: errors.New("second"),
-						},
-						fmt.Errorf("deep context: %w", ValidationError{
-							Value:  "third-value",
-							Reason: errors.New("third"),
-						}),
-					)),
-					fmt.Errorf("plain context: %w", plainFailure),
-				))
-			}).
+			Validators(func(int) error { return wrapped }).
 			Build()
 
 		config, err := Apply(option)
@@ -390,25 +379,29 @@ func TestBuilder(t *testing.T) {
 			t.Fatalf("setter calls = %d, config.value = %d, want untouched zero value", setterCalls, config.value)
 		}
 
-		want := []ValidationError{
-			{Field: "outer", Value: "first-value", Reason: errors.New("first")},
-			{Field: "inner", Value: "second-value", Reason: errors.New("second")},
-			{Field: "outer", Value: "third-value", Reason: errors.New("third")},
+		var outer ValidationError
+		wantOuter := ValidationError{Field: "outer", Value: "5", Reason: wrapped}
+		if !errors.As(err, &outer) || !sameValidationError(outer, wantOuter) {
+			t.Fatalf("Apply() error = %v, want outer failure %+v", err, wantOuter)
 		}
-		if got := validationErrors(err); !sameValidationErrors(got, want) {
-			t.Fatalf("Apply() errors = %+v, want %+v", got, want)
+		if outer.Reason != wrapped || !errors.Is(err, wrapped) || !errors.Is(err, joined) {
+			t.Fatalf("Apply() error = %v, want original wrapped and joined errors", err)
 		}
-		if !errors.Is(err, plainFailure) {
-			t.Fatalf("Apply() error = %v, want wrapped plain failure", err)
+		if !errors.Is(err, firstFailure) || !errors.Is(err, secondFailure) {
+			t.Fatalf("Apply() error = %v, want both nested failures", err)
 		}
-		if got := err.Error(); !strings.Contains(got, "validator context: outer: first") ||
-			!strings.Contains(got, "deep context: outer: third") ||
-			!strings.Contains(got, "plain context: plain") {
-			t.Fatalf("Apply() error = %q, want preserved wrapper context", got)
+
+		var gotInner *ValidationError
+		if !errors.As(outer.Reason, &gotInner) || gotInner != inner {
+			t.Fatalf("outer reason = %v, want original nested validation error", outer.Reason)
+		}
+		wantInner := ValidationError{Field: "inner", Value: "inner-value", Reason: firstFailure}
+		if !sameValidationError(*inner, wantInner) {
+			t.Fatalf("nested validation error = %+v, want unchanged %+v", inner, wantInner)
 		}
 	})
 
-	t.Run("preserves ordinary validator errors", func(t *testing.T) {
+	t.Run("wraps ordinary wrapped validator error", func(t *testing.T) {
 		failure := errors.New("failure")
 		wrapped := fmt.Errorf("validator context: %w", failure)
 		option := New(setConstructorValue).
@@ -418,6 +411,15 @@ func TestBuilder(t *testing.T) {
 			Build()
 
 		_, err := Apply(option)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want validation error")
+		}
+
+		var outer ValidationError
+		want := ValidationError{Field: "value", Value: "5", Reason: wrapped}
+		if !errors.As(err, &outer) || !sameValidationError(outer, want) || outer.Reason != wrapped {
+			t.Fatalf("Apply() error = %v, want %+v", err, want)
+		}
 		if !errors.Is(err, failure) || !errors.Is(err, wrapped) {
 			t.Fatalf("Apply() error = %v, want original wrapped failure", err)
 		}
@@ -425,19 +427,20 @@ func TestBuilder(t *testing.T) {
 
 	t.Run("collects joined failures from every validator", func(t *testing.T) {
 		var order []int
+		firstFailure := errors.New("first")
+		secondFailure := errors.New("second")
+		thirdFailure := errors.New("third")
 		option := New(setConstructorValue).
 			Value(5).
+			Named("value").
 			Validators(
 				func(int) error {
 					order = append(order, 1)
-					return errors.Join(
-						ValidationError{Reason: errors.New("first")},
-						ValidationError{Reason: errors.New("second")},
-					)
+					return errors.Join(firstFailure, secondFailure)
 				},
 				func(int) error {
 					order = append(order, 2)
-					return ValidationError{Reason: errors.New("third")}
+					return thirdFailure
 				},
 			).
 			Build()
@@ -452,54 +455,15 @@ func TestBuilder(t *testing.T) {
 		if config.value != 0 {
 			t.Fatalf("config.value = %d, want zero", config.value)
 		}
-
-		got := validationErrors(err)
-		want := []ValidationError{
-			{Reason: errors.New("first")},
-			{Reason: errors.New("second")},
-			{Reason: errors.New("third")},
+		if !errors.Is(err, firstFailure) || !errors.Is(err, secondFailure) || !errors.Is(err, thirdFailure) {
+			t.Fatalf("Apply() error = %v, want all validator failures", err)
 		}
-		if !sameValidationErrors(got, want) {
-			t.Fatalf("Apply() errors = %+v, want %+v", got, want)
+
+		var outer ValidationError
+		if !errors.As(err, &outer) || outer.Field != "value" || outer.Value != "5" {
+			t.Fatalf("Apply() error = %v, want option-level validation context", err)
 		}
 	})
-}
-
-func validationErrors(err error) []ValidationError {
-	if err == nil {
-		return nil
-	}
-
-	switch err := err.(type) {
-	case ValidationError:
-		return []ValidationError{err}
-	case *ValidationError:
-		return []ValidationError{*err}
-	case interface{ Unwrap() []error }:
-		var result []ValidationError
-		for _, child := range err.Unwrap() {
-			result = append(result, validationErrors(child)...)
-		}
-		return result
-	case interface{ Unwrap() error }:
-		return validationErrors(err.Unwrap())
-	default:
-		return nil
-	}
-}
-
-func sameValidationErrors(got, want []ValidationError) bool {
-	if len(got) != len(want) {
-		return false
-	}
-
-	for i := range got {
-		if !sameValidationError(got[i], want[i]) {
-			return false
-		}
-	}
-
-	return true
 }
 
 func sameValidationError(got, want ValidationError) bool {
