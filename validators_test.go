@@ -9,28 +9,7 @@ import (
 )
 
 func validationFailures[V any](value V, validator Validator[V]) []ValidationError {
-	var failures []ValidationError
-	validator(value, func(err ValidationError) {
-		failures = append(failures, err)
-	})
-	return failures
-}
-
-func TestCheck(t *testing.T) {
-	validator := Check(func(value int, report Report) {
-		if value < 1 {
-			report(ValidationError{Reason: "too small"})
-			report(ValidationError{Reason: "not positive"})
-		}
-	})
-
-	failures := validationFailures(0, validator)
-	if len(failures) != 2 {
-		t.Fatalf("failure count = %d, want 2", len(failures))
-	}
-	if failures[0].Reason != "too small" || failures[1].Reason != "not positive" {
-		t.Fatalf("failures = %+v", failures)
-	}
+	return validationErrors(validator(value))
 }
 
 func TestNotNil(t *testing.T) {

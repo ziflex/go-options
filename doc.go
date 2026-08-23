@@ -1,3 +1,3 @@
 // Package options provides a generic builder for functional options with
-// composable, report-based validation.
+// composable, error-returning validators and report-based option application.
 package options

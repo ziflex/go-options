@@ -2,6 +2,7 @@ package options
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -59,7 +60,10 @@ func TestBuilder(t *testing.T) {
 			setterCalls++
 			config.value = value
 		}).Named("value").Validators(
-			Check(func(_ int, _ Report) { validatorCalls++ }),
+			func(_ int) error {
+				validatorCalls++
+				return nil
+			},
 		).Build()
 
 		config, err := ApplyTo(initial, option)
@@ -133,17 +137,20 @@ func TestBuilder(t *testing.T) {
 		var order []int
 		option := New(setConstructorValue).
 			Value(5).
-			Validators(Check(func(_ int, report Report) {
+			Validators(func(_ int) error {
 				order = append(order, 1)
-				report(ValidationError{Reason: "first"})
-			})).
+				return ValidationError{Reason: "first"}
+			}).
 			Validators(
 				nil,
-				Check(func(_ int, _ Report) { order = append(order, 2) }),
-				Check(func(_ int, report Report) {
+				func(_ int) error {
+					order = append(order, 2)
+					return nil
+				},
+				func(_ int) error {
 					order = append(order, 3)
-					report(ValidationError{Reason: "third"})
-				}),
+					return ValidationError{Reason: "third"}
+				},
 			).
 			Build()
 
@@ -188,9 +195,9 @@ func TestBuilder(t *testing.T) {
 			New(setConstructorValue).
 				Value(0).
 				Named("outer").
-				Validators(Check(func(_ int, report Report) {
-					report(ValidationError{Field: "inner", Reason: "invalid"})
-				})).
+				Validators(func(_ int) error {
+					return ValidationError{Field: "inner", Reason: "invalid"}
+				}).
 				Build(),
 		)
 		if err == nil {
@@ -220,16 +227,17 @@ func TestBuilder(t *testing.T) {
 		}
 	})
 
-	t.Run("custom Check validator", func(t *testing.T) {
+	t.Run("custom validator", func(t *testing.T) {
 		called := false
 		option := New(setConstructorValue).
 			Value(4).
-			Validators(Check(func(value int, report Report) {
+			Validators(func(value int) error {
 				called = true
 				if value%2 != 0 {
-					report(ValidationError{Reason: "must be even"})
+					return ValidationError{Reason: "must be even"}
 				}
-			})).
+				return nil
+			}).
 			Build()
 
 		config, err := Apply(option)
@@ -250,7 +258,10 @@ func TestBuilder(t *testing.T) {
 			}
 			config.ptr = value
 		}).Value(&value).Validators(
-			Check(func(value *int, _ Report) { validated = value }),
+			func(value *int) error {
+				validated = value
+				return nil
+			},
 		).Build()
 
 		config, err := Apply(option)
@@ -264,11 +275,13 @@ func TestBuilder(t *testing.T) {
 
 	t.Run("builder reuse does not leak state", func(t *testing.T) {
 		var observed []string
-		baseValidator := Check(func(_ int, _ Report) {
+		baseValidator := Validator[int](func(_ int) error {
 			observed = append(observed, "base")
+			return nil
 		})
-		derivedValidator := Check(func(_ int, _ Report) {
+		derivedValidator := Validator[int](func(_ int) error {
 			observed = append(observed, "derived")
+			return nil
 		})
 		provided := []Validator[int]{baseValidator}
 		base := New(setConstructorValue).Validators(provided...)
@@ -293,4 +306,107 @@ func TestBuilder(t *testing.T) {
 			t.Fatalf("second config = %+v, validators = %v", secondConfig, observed)
 		}
 	})
+
+	t.Run("normalizes joined and wrapped errors", func(t *testing.T) {
+		setterCalls := 0
+		option := New(func(config *constructorConfig, value int) {
+			setterCalls++
+			config.value = value
+		}).
+			Value(5).
+			Named("outer").
+			Validators(func(int) error {
+				return fmt.Errorf("validator context: %w", errors.Join(
+					ValidationError{Value: "first-value", Reason: "first"},
+					fmt.Errorf("validation context: %w", &ValidationError{
+						Field:  "inner",
+						Value:  "second-value",
+						Reason: "second",
+					}),
+					fmt.Errorf("plain context: %w", errors.New("plain")),
+				))
+			}).
+			Build()
+
+		config, err := Apply(option)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want joined validation error")
+		}
+		if setterCalls != 0 || config.value != 0 {
+			t.Fatalf("setter calls = %d, config.value = %d, want untouched zero value", setterCalls, config.value)
+		}
+
+		want := []ValidationError{
+			{Field: "outer", Value: "first-value", Reason: "first"},
+			{Field: "inner", Value: "second-value", Reason: "second"},
+			{Field: "outer", Reason: "plain"},
+		}
+		if got := validationErrors(err); !reflect.DeepEqual(got, want) {
+			t.Fatalf("Apply() errors = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("collects joined failures from every validator", func(t *testing.T) {
+		var order []int
+		option := New(setConstructorValue).
+			Value(5).
+			Validators(
+				func(int) error {
+					order = append(order, 1)
+					return errors.Join(
+						ValidationError{Reason: "first"},
+						ValidationError{Reason: "second"},
+					)
+				},
+				func(int) error {
+					order = append(order, 2)
+					return ValidationError{Reason: "third"}
+				},
+			).
+			Build()
+
+		config, err := Apply(option)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want joined validation error")
+		}
+		if !reflect.DeepEqual(order, []int{1, 2}) {
+			t.Fatalf("validator order = %v, want [1 2]", order)
+		}
+		if config.value != 0 {
+			t.Fatalf("config.value = %d, want zero", config.value)
+		}
+
+		got := validationErrors(err)
+		want := []ValidationError{
+			{Reason: "first"},
+			{Reason: "second"},
+			{Reason: "third"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Apply() errors = %+v, want %+v", got, want)
+		}
+	})
+}
+
+func validationErrors(err error) []ValidationError {
+	if err == nil {
+		return nil
+	}
+
+	switch err := err.(type) {
+	case ValidationError:
+		return []ValidationError{err}
+	case *ValidationError:
+		return []ValidationError{*err}
+	case interface{ Unwrap() []error }:
+		var result []ValidationError
+		for _, child := range err.Unwrap() {
+			result = append(result, validationErrors(child)...)
+		}
+		return result
+	case interface{ Unwrap() error }:
+		return validationErrors(err.Unwrap())
+	default:
+		return nil
+	}
 }

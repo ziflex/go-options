@@ -61,11 +61,13 @@ func ExampleBuilder_Named() {
 	// workers: must be greater than or equal to 1: value=0
 }
 
-func ExampleCheck() {
-	even := options.Check(func(value int, report options.Report) {
+func ExampleValidator() {
+	even := options.Validator[int](func(value int) error {
 		if value%2 != 0 {
-			report(options.ValidationError{Reason: "must be even"})
+			return options.ValidationError{Reason: "must be even"}
 		}
+
+		return nil
 	})
 	option := options.New(
 		func(config *exampleConfig, value int) {

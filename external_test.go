@@ -17,3 +17,17 @@ func TestCollectionValidatorTypeInference(t *testing.T) {
 		t.Fatal("expected collection validators")
 	}
 }
+
+func TestCustomValidatorContract(t *testing.T) {
+	var validator options.Validator[int] = func(value int) error {
+		if value < 0 {
+			return options.ValidationError{Reason: "must not be negative"}
+		}
+
+		return nil
+	}
+
+	if err := validator(1); err != nil {
+		t.Fatalf("validator(1) error = %v", err)
+	}
+}

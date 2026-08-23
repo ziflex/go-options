@@ -19,7 +19,7 @@ go get github.com/ziflex/go-options
 - `Option[T any]`: A function type `func(*T, Report)` used to modify a configuration of type `T`.
 - `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
 - `Report`: A callback function `func(ValidationError)` used within an `Option` to report validation errors.
-- `Validator[V any]`: A function type `func(V, Report)` used to validate an option value without receiving the destination configuration.
+- `Validator[V any]`: A function type `func(V) error` used to validate an option value without receiving the destination configuration.
 - `ValidationError`: A struct representing a validation failure, containing `Field`, `Value`, and `Reason`.
 
 ### Functions
@@ -27,10 +27,10 @@ go get github.com/ziflex/go-options
 - `Apply(opts...)` creates a zero-value configuration and applies the options.
 - `ApplyTo(initial, opts...)` applies options to an existing configuration.
 - `New(setter)` creates an option builder and infers its configuration and value types from the setter.
-- `Check(check)` adapts custom validation logic.
 
 Validation failures are collected with `errors.Join`. All validators run, but the
-setter is called only when none of them reports a failure. Nil options and nil
+setter is called only when all of them return `nil`. Validators may return
+`errors.Join` to describe multiple failures. Nil options and nil
 validators are ignored.
 
 `ApplyWithValues` remains available as a deprecated alias for `ApplyTo`.
@@ -118,17 +118,19 @@ func WithNamedWorkers(workers int) options.Option[Config] {
 
 ### Custom validation
 
-`Check` is the escape hatch for application-specific rules. A check may report
-more than one `ValidationError`:
+Use `Validator` for application-specific rules. Return `nil` when the value is
+valid or an error describing why it is invalid:
 
 ```go
-var Even = options.Check(func(value int, report options.Report) {
+var Even = options.Validator[int](func(value int) error {
 	if value%2 != 0 {
-		report(options.ValidationError{
+		return options.ValidationError{
 			Reason: "must be even",
 			Value:  fmt.Sprint(value),
-		})
+		}
 	}
+
+	return nil
 })
 
 func WithEvenWorkers(workers int) options.Option[Config] {
@@ -139,6 +141,15 @@ func WithEvenWorkers(workers int) options.Option[Config] {
 		Validators(Even).
 		Build()
 }
+```
+
+Return `errors.Join` when one validator needs to describe multiple failures:
+
+```go
+return errors.Join(
+	options.ValidationError{Reason: "must be even"},
+	options.ValidationError{Reason: "must be positive"},
+)
 ```
 
 ### Built-in validators
