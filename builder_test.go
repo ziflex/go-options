@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -229,7 +230,7 @@ func TestBuilder(t *testing.T) {
 		}
 	})
 
-	t.Run("Named preserves unnamed validator field", func(t *testing.T) {
+	t.Run("Named enriches direct fieldless pointer without mutation", func(t *testing.T) {
 		reason := errors.New("invalid")
 		failure := &ValidationError{Value: "inner-value", Reason: reason}
 		_, err := Apply(
@@ -243,12 +244,68 @@ func TestBuilder(t *testing.T) {
 			t.Fatal("Apply() error = nil, want validation error")
 		}
 
-		var outer ValidationError
-		if !errors.As(err, &outer) || outer.Field != "outer" || outer.Reason != failure {
-			t.Fatalf("Apply() error = %v, want outer failure preserving cause", err)
+		var normalized *ValidationError
+		want := ValidationError{Field: "outer", Value: "inner-value", Reason: reason}
+		if !errors.As(err, &normalized) || normalized == nil || !sameValidationError(*normalized, want) {
+			t.Fatalf("Apply() error = %v, want normalized failure %+v", err, want)
+		}
+		if normalized == failure || normalized.Reason != reason {
+			t.Fatalf("Apply() error = %v, want a copied flat validation failure", err)
 		}
 		if failure.Field != "" || failure.Value != "inner-value" || failure.Reason != reason {
 			t.Fatalf("validator failure was mutated: %+v", failure)
+		}
+	})
+
+	t.Run("Named fills missing direct validation value", func(t *testing.T) {
+		reason := errors.New("invalid")
+		_, err := Apply(
+			New(setConstructorValue).
+				Value(0).
+				Named("value").
+				Validators(func(_ int) error {
+					return ValidationError{Reason: reason}
+				}).
+				Build(),
+		)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want validation error")
+		}
+
+		var validationError ValidationError
+		want := ValidationError{Field: "value", Value: "0", Reason: reason}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
+			t.Fatalf("Apply() error = %v, want %+v", err, want)
+		}
+		if validationError.Reason != reason {
+			t.Fatalf("Apply() error = %v, want original reason", err)
+		}
+	})
+
+	t.Run("named built-in validator produces one flat failure", func(t *testing.T) {
+		_, err := Apply(
+			New(setConstructorValue).
+				Value(-1).
+				Named("value").
+				Validators(NonNegative[int]()).
+				Build(),
+		)
+		if err == nil {
+			t.Fatal("Apply() error = nil, want validation error")
+		}
+
+		var validationError ValidationError
+		want := ValidationError{Field: "value", Value: "-1", Reason: errors.New("must be non-negative")}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
+			t.Fatalf("Apply() error = %v, want %+v", err, want)
+		}
+
+		var nested ValidationError
+		if errors.As(validationError.Reason, &nested) {
+			t.Fatalf("validation reason = %+v, want a non-validation leaf error", validationError.Reason)
+		}
+		if count := strings.Count(err.Error(), "value=-1"); count != 1 {
+			t.Fatalf("Apply() error = %q, want one rendered invalid value, got %d", err, count)
 		}
 	})
 
