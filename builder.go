@@ -68,7 +68,7 @@ func (b Builder[C, V]) Build() Option[C] {
 			}
 
 			if err := validator(value); err != nil {
-				errs = append(errs, buildValidationError(name, fmt.Sprint(value), err))
+				errs = append(errs, ToValidationError(name, fmt.Sprint(value), err))
 			}
 		}
 
@@ -79,39 +79,5 @@ func (b Builder[C, V]) Build() Option[C] {
 		setter(config, value)
 
 		return nil
-	}
-}
-
-func buildValidationError(field, value string, err error) error {
-	switch validationErr := err.(type) {
-	case ValidationError:
-		if validationErr.Field != "" {
-			break
-		}
-
-		validationErr.Field = field
-		if validationErr.Value == "" {
-			validationErr.Value = value
-		}
-
-		return validationErr
-	case *ValidationError:
-		if validationErr == nil || validationErr.Field != "" {
-			break
-		}
-
-		normalized := *validationErr
-		normalized.Field = field
-		if normalized.Value == "" {
-			normalized.Value = value
-		}
-
-		return &normalized
-	}
-
-	return ValidationError{
-		Field:  field,
-		Value:  value,
-		Reason: err,
 	}
 }
