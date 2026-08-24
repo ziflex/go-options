@@ -128,7 +128,7 @@ func ExampleNotNil() {
 	fmt.Println(err)
 
 	// Output:
-	// must not be nil: value=<nil>: value=<nil>
+	// must not be nil: value=<nil>
 }
 
 func ExampleNotNilPtr() {
