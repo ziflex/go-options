@@ -2,8 +2,10 @@ package options
 
 import "errors"
 
-// Option configures a value of type T and returns any failure.
-type Option[T any] func(*T) error
+// Option is an alias for a function that configures a value of type T and
+// returns any failure. Equivalent project-specific function types interoperate
+// with Option without explicit conversions.
+type Option[T any] = func(*T) error
 
 // Apply creates the zero value of T and applies each non-nil option in order.
 // It returns the resulting value and any failures joined into one error.

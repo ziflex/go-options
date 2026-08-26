@@ -16,7 +16,9 @@ go get github.com/ziflex/go-options
 
 ### Types
 
-- `Option[T any]`: A function type `func(*T) error` used to modify a configuration of type `T`.
+- `Option[T any]`: A type alias for `func(*T) error` used to modify a
+  configuration of type `T`. Equivalent project-specific function types can be
+  used without explicit conversions.
 - `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
 - `Validator[V any]`: A function type `func(V) error` used to validate an option value without receiving the destination configuration.
 - `ValidationError`: A struct representing a validation failure, containing
@@ -106,11 +108,15 @@ func main() {
 
 ### Custom options
 
-Options may also be implemented directly. Return `nil` after a successful
-mutation or return an ordinary Go error when the option cannot be applied:
+Options may also be implemented directly. Because `Option` is a type alias,
+projects can expose their own named option function type and use it directly
+with `Apply`. Options produced by a builder can use the same project-specific
+type without an explicit conversion:
 
 ```go
-func WithWorkers(workers int) options.Option[Config] {
+type ConfigOption func(*Config) error
+
+func WithWorkers(workers int) ConfigOption {
 	return func(config *Config) error {
 		if workers < 1 {
 			return options.ValidationError{
@@ -124,6 +130,17 @@ func WithWorkers(workers int) options.Option[Config] {
 		return nil
 	}
 }
+
+func WithTimeout(timeout time.Duration) ConfigOption {
+	return options.New(func(config *Config, value time.Duration) {
+		config.Timeout = value
+	}).Value(timeout).Build()
+}
+
+config, err := options.Apply(
+	WithWorkers(4),
+	WithTimeout(5*time.Second),
+)
 ```
 
 A custom option with independent failures can return

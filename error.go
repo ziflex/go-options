@@ -12,6 +12,43 @@ type ValidationError struct {
 	Reason error
 }
 
+// ToValidationError returns a ValidationError that describes the failure of a configuration value.
+// If err is already a ValidationError, it is returned with its Field and Value set if they are empty.
+// Otherwise, a new ValidationError is returned with the provided field, value, and reason.
+func ToValidationError(field, value string, err error) error {
+	switch validationErr := err.(type) {
+	case ValidationError:
+		if validationErr.Field != "" {
+			break
+		}
+
+		validationErr.Field = field
+		if validationErr.Value == "" {
+			validationErr.Value = value
+		}
+
+		return validationErr
+	case *ValidationError:
+		if validationErr == nil || validationErr.Field != "" {
+			break
+		}
+
+		normalized := *validationErr
+		normalized.Field = field
+		if normalized.Value == "" {
+			normalized.Value = value
+		}
+
+		return &normalized
+	}
+
+	return ValidationError{
+		Field:  field,
+		Value:  value,
+		Reason: err,
+	}
+}
+
 func (d ValidationError) Error() string {
 	var b strings.Builder
 
