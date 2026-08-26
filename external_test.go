@@ -7,6 +7,12 @@ import (
 	options "github.com/ziflex/go-options"
 )
 
+type externalConfig struct {
+	value int
+}
+
+type externalOption func(*externalConfig) error
+
 func TestCollectionValidatorTypeInference(t *testing.T) {
 	type names []string
 	type labels map[string]int
@@ -80,5 +86,37 @@ func TestCustomOptionContract(t *testing.T) {
 	}
 	if got.value != 1 {
 		t.Fatalf("config.value = %d, want 1", got.value)
+	}
+}
+
+func TestOptionAliasAcceptsNamedFunctionType(t *testing.T) {
+	option := externalOption(func(config *externalConfig) error {
+		config.value = 1
+
+		return nil
+	})
+
+	got, err := options.Apply(option)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if got.value != 1 {
+		t.Fatalf("config.value = %d, want 1", got.value)
+	}
+}
+
+func TestOptionAliasAssignsBuilderOutputToNamedFunctionType(t *testing.T) {
+	var option externalOption = options.New(
+		func(config *externalConfig, value int) {
+			config.value = value
+		},
+	).Value(2).Build()
+
+	got, err := options.Apply(option)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if got.value != 2 {
+		t.Fatalf("config.value = %d, want 2", got.value)
 	}
 }
