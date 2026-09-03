@@ -33,9 +33,10 @@ go get github.com/ziflex/go-options
 - `New(setter)` creates an option builder and infers its configuration and value types from the setter.
 
 `Apply` invokes every option and combines returned failures with `errors.Join`.
-Builder-produced options run every validator, but call their setter only when all
-validators return `nil`. Validators and custom options may return `errors.Join`
-to describe multiple failures. Nil options and nil validators are ignored.
+Builder-produced options resolve defaults before running every validator, but
+call their setter only when all validators return `nil`. Validators and custom
+options may return `errors.Join` to describe multiple failures. Nil options and
+nil validators are ignored.
 `ValidationError` unwraps its `Reason`, so callers can inspect underlying causes
 with `errors.Is` and `errors.As`.
 
@@ -45,10 +46,12 @@ with `errors.Is` and `errors.As`.
 
 ### Building options
 
-Option construction has five stages:
+Option construction has six stages:
 
 - `New` defines how the option modifies its configuration.
-- `Value` binds the required option value, including an explicit zero value.
+- `Value` binds the option value.
+- `Default` optionally supplies a fallback when `Value` is omitted or binds a
+  Go zero value.
 - `Named` optionally sets the option name used when `Build` describes
   validation failures.
 - `Validators` optionally appends validators in execution order.
@@ -105,6 +108,29 @@ func main() {
 	fmt.Println(config.Timeout, config.Workers)
 }
 ```
+
+### Default values
+
+`Default` uses Go zero-value semantics. It replaces numeric zero, `""`,
+`false`, zero arrays and structs, and nil pointers, interfaces, slices, maps,
+channels, and functions. Non-nil empty slices and maps are preserved, so callers
+can distinguish an omitted collection from an explicitly supplied empty one:
+
+```go
+func WithWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
+		config.Workers = value
+	}).Value(workers).Default(4).Build()
+}
+```
+
+Defaults are resolved before validation, so validators and the setter receive
+the same effective value. `Value` and `Default` may be called in either order,
+and repeated calls use the latest value of each kind.
+
+A plain boolean cannot distinguish an omitted value from an explicit `false`.
+Consequently, `Value(false).Default(true)` resolves to `true`. Use a pointer or
+an optional wrapper when both states must remain distinct.
 
 ### Custom options
 

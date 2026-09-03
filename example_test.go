@@ -44,6 +44,17 @@ func ExampleBuilder() {
 	// 5s <nil>
 }
 
+func ExampleBuilder_Default() {
+	option := options.New(func(config *exampleConfig, value int) {
+		config.workers = value
+	}).Value(0).Default(4).Build()
+	config, err := options.Apply(option)
+	fmt.Println(config.workers, err)
+
+	// Output:
+	// 4 <nil>
+}
+
 func ExampleBuilder_Named() {
 	option := options.New(
 		func(config *exampleConfig, value int) {
