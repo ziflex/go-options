@@ -8,13 +8,14 @@ import (
 // Builder describes an option for configuration type C with value type V.
 // Create builders with New.
 type Builder[C, V any] struct {
-	setter       func(*C, V)
-	value        V
-	hasValue     bool
-	defaultValue V
-	hasDefault   bool
-	name         string
-	validators   []Validator[V]
+	setter           func(*C, V)
+	value            V
+	hasValue         bool
+	defaultValue     V
+	defaultPredicate Predicate[V]
+	hasDefault       bool
+	name             string
+	validators       []Validator[V]
 }
 
 // New creates a builder that uses setter to apply its value.
@@ -31,10 +32,24 @@ func (b Builder[C, V]) Value(value V) Builder[C, V] {
 }
 
 // Default binds a fallback used when Value was not called or its bound value
-// is the zero value of its dynamic type. Repeated calls replace the previous
-// default. Default and Value may be called in either order.
+// is the zero value of its dynamic type. Repeated calls to Default or
+// DefaultWhen replace the previous fallback policy. Default and Value may be
+// called in either order.
 func (b Builder[C, V]) Default(defaultValue V) Builder[C, V] {
 	b.defaultValue = defaultValue
+	b.defaultPredicate = isZero[V]
+	b.hasDefault = true
+
+	return b
+}
+
+// DefaultWhen binds a fallback used when Value was not called or predicate
+// matches its bound value. A nil predicate never matches a bound value.
+// Repeated calls to Default or DefaultWhen replace the previous fallback
+// policy. DefaultWhen and Value may be called in either order.
+func (b Builder[C, V]) DefaultWhen(defaultValue V, predicate Predicate[V]) Builder[C, V] {
+	b.defaultValue = defaultValue
+	b.defaultPredicate = predicate
 	b.hasDefault = true
 
 	return b
@@ -58,14 +73,14 @@ func (b Builder[C, V]) Validators(validators ...Validator[V]) Builder[C, V] {
 	return b
 }
 
-// Build produces the configured option. If neither Value nor Default was
-// called, the option returns a validation failure when applied.
+// Build produces the configured option. If neither Value nor a default was
+// configured, the option returns a validation failure when applied.
 func (b Builder[C, V]) Build() Option[C] {
 	setter := b.setter
 	value := b.value
 	hasValue := b.hasValue
 
-	if b.hasDefault && (!hasValue || isZero(value)) {
+	if b.hasDefault && (!hasValue || (b.defaultPredicate != nil && b.defaultPredicate(value))) {
 		value = b.defaultValue
 		hasValue = true
 	}

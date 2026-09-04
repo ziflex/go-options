@@ -3,6 +3,7 @@ package options_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	options "github.com/ziflex/go-options"
@@ -53,6 +54,21 @@ func ExampleBuilder_Default() {
 
 	// Output:
 	// 4 <nil>
+}
+
+func ExampleBuilder_DefaultWhen() {
+	type config struct{ host string }
+
+	option := options.New(func(config *config, value string) {
+		config.host = value
+	}).Value(" \t").DefaultWhen("localhost", func(value string) bool {
+		return strings.TrimSpace(value) == ""
+	}).Build()
+	got, err := options.Apply(option)
+	fmt.Println(got.host, err)
+
+	// Output:
+	// localhost <nil>
 }
 
 func ExampleBuilder_Named() {
