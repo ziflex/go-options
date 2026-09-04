@@ -20,6 +20,8 @@ go get github.com/ziflex/go-options
   configuration of type `T`. Equivalent project-specific function types can be
   used without explicit conversions.
 - `Builder[C, V any]`: A value-based builder that describes one option before producing it with `Build`.
+- `Predicate[V any]`: A function type `func(V) bool` that reports whether a
+  default should replace an option value.
 - `Validator[V any]`: A function type `func(V) error` used to validate an option value without receiving the destination configuration.
 - `ValidationError`: A struct representing a validation failure, containing
   `Field`, `Value`, and an error-valued `Reason`.
@@ -33,9 +35,10 @@ go get github.com/ziflex/go-options
 - `New(setter)` creates an option builder and infers its configuration and value types from the setter.
 
 `Apply` invokes every option and combines returned failures with `errors.Join`.
-Builder-produced options run every validator, but call their setter only when all
-validators return `nil`. Validators and custom options may return `errors.Join`
-to describe multiple failures. Nil options and nil validators are ignored.
+Builder-produced options resolve defaults before running every validator, but
+call their setter only when all validators return `nil`. Validators and custom
+options may return `errors.Join` to describe multiple failures. Nil options and
+nil validators are ignored.
 `ValidationError` unwraps its `Reason`, so callers can inspect underlying causes
 with `errors.Is` and `errors.As`.
 
@@ -45,10 +48,12 @@ with `errors.Is` and `errors.As`.
 
 ### Building options
 
-Option construction has five stages:
+Option construction has six stages:
 
 - `New` defines how the option modifies its configuration.
-- `Value` binds the required option value, including an explicit zero value.
+- `Value` binds the option value.
+- `Default` or `DefaultWhen` optionally supplies a fallback when `Value` is
+  omitted or matches the configured fallback policy.
 - `Named` optionally sets the option name used when `Build` describes
   validation failures.
 - `Validators` optionally appends validators in execution order.
@@ -68,6 +73,7 @@ import (
 )
 
 type Config struct {
+	Host    string
 	Timeout time.Duration
 	Workers int
 }
@@ -105,6 +111,55 @@ func main() {
 	fmt.Println(config.Timeout, config.Workers)
 }
 ```
+
+### Default values
+
+`Default` uses Go zero-value semantics. It replaces numeric zero, `""`,
+`false`, zero arrays and structs, and nil pointers, interfaces, slices, maps,
+channels, and functions. Non-nil empty slices and maps are preserved, so callers
+can distinguish an omitted collection from an explicitly supplied empty one:
+
+```go
+func WithWorkers(workers int) options.Option[Config] {
+	return options.New(func(config *Config, value int) {
+		config.Workers = value
+	}).Value(workers).Default(4).Build()
+}
+```
+
+Defaults are resolved before validation, so validators and the setter receive
+the same effective value. `DefaultWhen` uses a caller-provided `Predicate`
+instead of reflection, which supports domain-specific empty values:
+
+```go
+func WithHost(host string) options.Option[Config] {
+	return options.New(func(config *Config, value string) {
+		config.Host = value
+	}).Value(host).DefaultWhen("localhost", func(value string) bool {
+		return value == "auto"
+	}).Build()
+}
+```
+
+`Value` and either default method may be called in either order. Repeated
+fallback declarations use the latest policy. A nil custom predicate never
+matches a supplied value, but its default still satisfies a builder without a
+`Value`.
+
+A plain boolean cannot distinguish an omitted value from an explicit `false`.
+Consequently, `Value(false).Default(true)` resolves to `true`. Use a pointer or
+an optional wrapper when both states must remain distinct.
+
+Built-in predicates follow the same generic constructor style as validators and
+support named string, slice, and map types:
+
+| Predicate | Matches |
+| --- | --- |
+| `EmptyString[S]()` | Empty strings. |
+| `NilSlice[S]()` | Nil slices only. |
+| `EmptySlice[S]()` | Nil and non-nil zero-length slices. |
+| `NilMap[M]()` | Nil maps only. |
+| `EmptyMap[M]()` | Nil and non-nil zero-length maps. |
 
 ### Custom options
 

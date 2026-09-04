@@ -25,6 +25,26 @@ func TestCollectionValidatorTypeInference(t *testing.T) {
 	}
 }
 
+func TestPredicateHelperTypeInference(t *testing.T) {
+	type name string
+	type names []string
+	type labels map[string]int
+
+	var stringPredicate options.Predicate[name] = options.EmptyString[name]()
+	var nilSlicePredicate options.Predicate[names] = options.NilSlice[names]()
+	var emptySlicePredicate options.Predicate[names] = options.EmptySlice[names]()
+	var nilMapPredicate options.Predicate[labels] = options.NilMap[labels]()
+	var emptyMapPredicate options.Predicate[labels] = options.EmptyMap[labels]()
+
+	if stringPredicate == nil ||
+		nilSlicePredicate == nil ||
+		emptySlicePredicate == nil ||
+		nilMapPredicate == nil ||
+		emptyMapPredicate == nil {
+		t.Fatal("expected predicate helpers")
+	}
+}
+
 func TestNumericSignValidatorTypes(t *testing.T) {
 	type count int64
 	type ratio float32

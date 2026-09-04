@@ -13,8 +13,456 @@ type constructorConfig struct {
 	ptr   *int
 }
 
+type defaultConfig[V any] struct {
+	value V
+}
+
 func setConstructorValue(config *constructorConfig, value int) {
 	config.value = value
+}
+
+func applyDefault[V any](value, defaultValue V) (V, error) {
+	option := New(func(config *defaultConfig[V], value V) {
+		config.value = value
+	}).Value(value).Default(defaultValue).Build()
+	config, err := Apply(option)
+
+	return config.value, err
+}
+
+func applyDefaultWhen[V any](value, defaultValue V, predicate Predicate[V]) (V, error) {
+	option := New(func(config *defaultConfig[V], value V) {
+		config.value = value
+	}).Value(value).DefaultWhen(defaultValue, predicate).Build()
+	config, err := Apply(option)
+
+	return config.value, err
+}
+
+func TestBuilderDefault(t *testing.T) {
+	t.Run("zero values use default", func(t *testing.T) {
+		assertDefault := func(name string, got, want any, err error) {
+			t.Helper()
+			if err != nil {
+				t.Fatalf("%s: Apply() error = %v", name, err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s: value = %#v, want %#v", name, got, want)
+			}
+		}
+
+		gotInt, err := applyDefault(0, 7)
+		assertDefault("int", gotInt, 7, err)
+
+		gotString, err := applyDefault("", "default")
+		assertDefault("string", gotString, "default", err)
+
+		gotBool, err := applyDefault(false, true)
+		assertDefault("bool", gotBool, true, err)
+
+		defaultInt := 9
+		gotPointer, err := applyDefault((*int)(nil), &defaultInt)
+		assertDefault("pointer", gotPointer, &defaultInt, err)
+
+		gotSlice, err := applyDefault([]string(nil), []string{"default"})
+		assertDefault("slice", gotSlice, []string{"default"}, err)
+
+		gotMap, err := applyDefault(map[string]int(nil), map[string]int{"default": 1})
+		assertDefault("map", gotMap, map[string]int{"default": 1}, err)
+
+		type count int
+		gotNamed, err := applyDefault(count(0), count(3))
+		assertDefault("named int", gotNamed, count(3), err)
+
+		gotArray, err := applyDefault([2]int{}, [2]int{1, 2})
+		assertDefault("array", gotArray, [2]int{1, 2}, err)
+
+		type settings struct{ enabled bool }
+		gotStruct, err := applyDefault(settings{}, settings{enabled: true})
+		assertDefault("struct", gotStruct, settings{enabled: true}, err)
+
+		var typedNil any = (*int)(nil)
+		gotInterface, err := applyDefault(typedNil, any("default"))
+		assertDefault("typed nil interface", gotInterface, any("default"), err)
+
+		gotDynamicZero, err := applyDefault(any(0), any(7))
+		assertDefault("dynamic zero interface", gotDynamicZero, any(7), err)
+
+		defaultChannel := make(chan int)
+		defer close(defaultChannel)
+		gotChannel, err := applyDefault((chan int)(nil), defaultChannel)
+		assertDefault("channel", gotChannel, defaultChannel, err)
+
+		var nilFunction func() int
+		defaultFunction := func() int { return 7 }
+		gotFunction, err := applyDefault(nilFunction, defaultFunction)
+		if err != nil {
+			t.Fatalf("function: Apply() error = %v", err)
+		}
+		if gotFunction == nil || gotFunction() != 7 {
+			t.Fatal("function: expected callable default")
+		}
+	})
+
+	t.Run("validators and setter receive resolved default", func(t *testing.T) {
+		validated := 0
+		option := New(func(config *constructorConfig, value int) {
+			config.value = value
+		}).Value(0).Default(4).Validators(func(value int) error {
+			validated = value
+
+			return nil
+		}).Build()
+
+		config, err := Apply(option)
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+		if validated != 4 || config.value != 4 {
+			t.Fatalf("validated = %d, value = %d, want 4, 4", validated, config.value)
+		}
+	})
+
+	t.Run("non-zero values are preserved", func(t *testing.T) {
+		gotInt, err := applyDefault(2, 7)
+		if err != nil || gotInt != 2 {
+			t.Fatalf("int value = %d, error = %v, want 2, nil", gotInt, err)
+		}
+
+		gotString, err := applyDefault("value", "default")
+		if err != nil || gotString != "value" {
+			t.Fatalf("string value = %q, error = %v, want value, nil", gotString, err)
+		}
+
+		gotBool, err := applyDefault(true, false)
+		if err != nil || !gotBool {
+			t.Fatalf("bool value = %t, error = %v, want true, nil", gotBool, err)
+		}
+
+		value := 0
+		defaultValue := 9
+		gotPointer, err := applyDefault(&value, &defaultValue)
+		if err != nil || gotPointer != &value {
+			t.Fatalf("pointer value = %p, error = %v, want %p, nil", gotPointer, err, &value)
+		}
+
+		gotSlice, err := applyDefault([]string{}, []string{"default"})
+		if err != nil || gotSlice == nil || len(gotSlice) != 0 {
+			t.Fatalf("slice value = %#v, error = %v, want non-nil empty slice, nil", gotSlice, err)
+		}
+
+		gotMap, err := applyDefault(map[string]int{}, map[string]int{"default": 1})
+		if err != nil || gotMap == nil || len(gotMap) != 0 {
+			t.Fatalf("map value = %#v, error = %v, want non-nil empty map, nil", gotMap, err)
+		}
+
+		gotSlice, err = applyDefault([]string{"value"}, []string{"default"})
+		if err != nil || !reflect.DeepEqual(gotSlice, []string{"value"}) {
+			t.Fatalf("populated slice = %#v, error = %v, want [value], nil", gotSlice, err)
+		}
+
+		gotMap, err = applyDefault(map[string]int{"value": 1}, map[string]int{"default": 1})
+		if err != nil || !reflect.DeepEqual(gotMap, map[string]int{"value": 1}) {
+			t.Fatalf("populated map = %#v, error = %v, want map[value:1], nil", gotMap, err)
+		}
+
+		type settings struct{ enabled bool }
+		gotStruct, err := applyDefault(settings{enabled: true}, settings{})
+		if err != nil || gotStruct != (settings{enabled: true}) {
+			t.Fatalf("struct value = %+v, error = %v, want {enabled:true}, nil", gotStruct, err)
+		}
+	})
+
+	t.Run("default supplies omitted value including zero", func(t *testing.T) {
+		setterCalls := 0
+		validatorCalls := 0
+		option := New(func(config *constructorConfig, value int) {
+			setterCalls++
+			config.value = value
+		}).Default(0).Validators(func(value int) error {
+			validatorCalls++
+			if value != 0 {
+				return fmt.Errorf("value = %d, want 0", value)
+			}
+
+			return nil
+		}).Build()
+
+		config, err := Apply(option)
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+		if setterCalls != 1 || validatorCalls != 1 || config.value != 0 {
+			t.Fatalf(
+				"setter calls = %d, validator calls = %d, value = %d, want 1, 1, 0",
+				setterCalls,
+				validatorCalls,
+				config.value,
+			)
+		}
+	})
+
+	t.Run("Value and Default are order independent and use latest calls", func(t *testing.T) {
+		base := New(setConstructorValue)
+		options := []Option[constructorConfig]{
+			base.Value(0).Default(1).Default(2).Build(),
+			base.Default(1).Default(2).Value(0).Build(),
+			base.Default(1).Value(0).Value(3).Build(),
+		}
+		wants := []int{2, 2, 3}
+
+		for i, option := range options {
+			config, err := Apply(option)
+			if err != nil {
+				t.Fatalf("option %d: Apply() error = %v", i, err)
+			}
+			if config.value != wants[i] {
+				t.Fatalf("option %d: value = %d, want %d", i, config.value, wants[i])
+			}
+		}
+
+		_, err := Apply(base.Build())
+		if err == nil || err.Error() != "option value was not provided" {
+			t.Fatalf("base Apply() error = %v, want missing-value error", err)
+		}
+	})
+
+	t.Run("validators inspect resolved default and suppress setter on failure", func(t *testing.T) {
+		initial := constructorConfig{value: 9}
+		setterCalls := 0
+		validated := -1
+		failure := errors.New("invalid default")
+		option := New(func(config *constructorConfig, value int) {
+			setterCalls++
+			config.value = value
+		}).Value(0).Default(4).Named("value").Validators(func(value int) error {
+			validated = value
+
+			return failure
+		}).Build()
+
+		config, err := ApplyTo(initial, option)
+		if err == nil {
+			t.Fatal("ApplyTo() error = nil, want validation error")
+		}
+		if setterCalls != 0 || validated != 4 || config != initial {
+			t.Fatalf(
+				"setter calls = %d, validated = %d, config = %+v, want 0, 4, %+v",
+				setterCalls,
+				validated,
+				config,
+				initial,
+			)
+		}
+
+		var validationError ValidationError
+		want := ValidationError{Field: "value", Value: "4", Reason: failure}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
+			t.Fatalf("ApplyTo() error = %v, want %+v", err, want)
+		}
+	})
+}
+
+func TestBuilderDefaultWhen(t *testing.T) {
+	t.Run("predicate controls fallback", func(t *testing.T) {
+		useDefault := Predicate[int](func(value int) bool { return value < 0 })
+
+		got, err := applyDefaultWhen(-1, 7, useDefault)
+		if err != nil || got != 7 {
+			t.Fatalf("matching value = %d, error = %v, want 7, nil", got, err)
+		}
+
+		got, err = applyDefaultWhen(2, 7, useDefault)
+		if err != nil || got != 2 {
+			t.Fatalf("non-matching value = %d, error = %v, want 2, nil", got, err)
+		}
+
+		got, err = applyDefaultWhen(0, 7, useDefault)
+		if err != nil || got != 0 {
+			t.Fatalf("non-matching zero value = %d, error = %v, want 0, nil", got, err)
+		}
+	})
+
+	t.Run("supports domain-specific empty values", func(t *testing.T) {
+		blank := Predicate[string](func(value string) bool {
+			return strings.TrimSpace(value) == ""
+		})
+
+		got, err := applyDefaultWhen(" \t", "fallback", blank)
+		if err != nil || got != "fallback" {
+			t.Fatalf("blank value = %q, error = %v, want fallback, nil", got, err)
+		}
+
+		got, err = applyDefaultWhen("value", "fallback", blank)
+		if err != nil || got != "value" {
+			t.Fatalf("non-blank value = %q, error = %v, want value, nil", got, err)
+		}
+	})
+
+	t.Run("supports collection helper predicates", func(t *testing.T) {
+		fallbackSlice := []string{"fallback"}
+		gotSlice, err := applyDefaultWhen([]string{}, fallbackSlice, EmptySlice[[]string]())
+		if err != nil || !reflect.DeepEqual(gotSlice, fallbackSlice) {
+			t.Fatalf("empty slice = %#v, error = %v, want %#v, nil", gotSlice, err, fallbackSlice)
+		}
+
+		gotSlice, err = applyDefaultWhen([]string{}, fallbackSlice, NilSlice[[]string]())
+		if err != nil || gotSlice == nil || len(gotSlice) != 0 {
+			t.Fatalf("non-nil slice = %#v, error = %v, want non-nil empty slice, nil", gotSlice, err)
+		}
+
+		fallbackMap := map[string]int{"fallback": 1}
+		gotMap, err := applyDefaultWhen(map[string]int{}, fallbackMap, EmptyMap[map[string]int]())
+		if err != nil || !reflect.DeepEqual(gotMap, fallbackMap) {
+			t.Fatalf("empty map = %#v, error = %v, want %#v, nil", gotMap, err, fallbackMap)
+		}
+
+		gotMap, err = applyDefaultWhen(map[string]int{}, fallbackMap, NilMap[map[string]int]())
+		if err != nil || gotMap == nil || len(gotMap) != 0 {
+			t.Fatalf("non-nil map = %#v, error = %v, want non-nil empty map, nil", gotMap, err)
+		}
+	})
+
+	t.Run("Value and DefaultWhen are order independent", func(t *testing.T) {
+		predicate := Predicate[int](func(value int) bool { return value == 0 })
+		base := New(setConstructorValue)
+		options := []Option[constructorConfig]{
+			base.Value(0).DefaultWhen(4, predicate).Build(),
+			base.DefaultWhen(4, predicate).Value(0).Build(),
+		}
+
+		for i, option := range options {
+			config, err := Apply(option)
+			if err != nil {
+				t.Fatalf("option %d: Apply() error = %v", i, err)
+			}
+			if config.value != 4 {
+				t.Fatalf("option %d: value = %d, want 4", i, config.value)
+			}
+		}
+	})
+
+	t.Run("missing value uses default without evaluating predicate", func(t *testing.T) {
+		predicateCalls := 0
+		option := New(setConstructorValue).DefaultWhen(4, func(int) bool {
+			predicateCalls++
+
+			return false
+		}).Build()
+		if predicateCalls != 0 {
+			t.Fatalf("predicate calls after Build = %d, want 0", predicateCalls)
+		}
+
+		config, err := Apply(option)
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+		if predicateCalls != 0 || config.value != 4 {
+			t.Fatalf("predicate calls = %d, value = %d, want 0, 4", predicateCalls, config.value)
+		}
+	})
+
+	t.Run("nil predicate preserves supplied value and defaults missing value", func(t *testing.T) {
+		withValue, err := Apply(
+			New(setConstructorValue).Value(0).DefaultWhen(4, nil).Build(),
+		)
+		if err != nil || withValue.value != 0 {
+			t.Fatalf("supplied value = %d, error = %v, want 0, nil", withValue.value, err)
+		}
+
+		withoutValue, err := Apply(
+			New(setConstructorValue).DefaultWhen(4, nil).Build(),
+		)
+		if err != nil || withoutValue.value != 4 {
+			t.Fatalf("missing value = %d, error = %v, want 4, nil", withoutValue.value, err)
+		}
+	})
+
+	t.Run("latest fallback policy wins and builder reuse remains isolated", func(t *testing.T) {
+		always := Predicate[int](func(int) bool { return true })
+		never := Predicate[int](func(int) bool { return false })
+		base := New(setConstructorValue).Value(1)
+		options := []Option[constructorConfig]{
+			base.DefaultWhen(2, never).DefaultWhen(3, always).Build(),
+			base.DefaultWhen(2, always).Default(3).Build(),
+			base.Default(2).DefaultWhen(3, always).Build(),
+			base.Build(),
+		}
+		wants := []int{3, 1, 3, 1}
+
+		for i, option := range options {
+			config, err := Apply(option)
+			if err != nil {
+				t.Fatalf("option %d: Apply() error = %v", i, err)
+			}
+			if config.value != wants[i] {
+				t.Fatalf("option %d: value = %d, want %d", i, config.value, wants[i])
+			}
+		}
+	})
+
+	t.Run("predicate is evaluated once during Build", func(t *testing.T) {
+		predicateCalls := 0
+		builder := New(setConstructorValue).Value(0).DefaultWhen(4, func(int) bool {
+			predicateCalls++
+
+			return true
+		})
+		option := builder.Build()
+		if predicateCalls != 1 {
+			t.Fatalf("predicate calls after Build = %d, want 1", predicateCalls)
+		}
+
+		for range 2 {
+			config, err := Apply(option)
+			if err != nil {
+				t.Fatalf("Apply() error = %v", err)
+			}
+			if config.value != 4 {
+				t.Fatalf("config.value = %d, want 4", config.value)
+			}
+		}
+		if predicateCalls != 1 {
+			t.Fatalf("predicate calls after Apply = %d, want 1", predicateCalls)
+		}
+	})
+
+	t.Run("validators inspect resolved value and suppress setter on failure", func(t *testing.T) {
+		initial := constructorConfig{value: 9}
+		setterCalls := 0
+		validated := ""
+		failure := errors.New("invalid default")
+		option := New(func(config *constructorConfig, value string) {
+			setterCalls++
+			config.value = len(value)
+		}).Value(" ").DefaultWhen("fallback", func(value string) bool {
+			return strings.TrimSpace(value) == ""
+		}).Named("value").Validators(func(value string) error {
+			validated = value
+
+			return failure
+		}).Build()
+
+		config, err := ApplyTo(initial, option)
+		if err == nil {
+			t.Fatal("ApplyTo() error = nil, want validation error")
+		}
+		if setterCalls != 0 || validated != "fallback" || config != initial {
+			t.Fatalf(
+				"setter calls = %d, validated = %q, config = %+v, want 0, fallback, %+v",
+				setterCalls,
+				validated,
+				config,
+				initial,
+			)
+		}
+
+		var validationError ValidationError
+		want := ValidationError{Field: "value", Value: "fallback", Reason: failure}
+		if !errors.As(err, &validationError) || !sameValidationError(validationError, want) {
+			t.Fatalf("ApplyTo() error = %v, want %+v", err, want)
+		}
+	})
 }
 
 func TestBuilder(t *testing.T) {
