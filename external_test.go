@@ -19,10 +19,21 @@ func TestCollectionValidatorTypeInference(t *testing.T) {
 
 	var sliceValidator options.Validator[names] = options.SliceMinLen[names](1)
 	var mapValidator options.Validator[labels] = options.MapMaxLen[labels](2)
+	var each options.Validator[names] = options.SliceEach[names](options.NotBlank[string]())
+	var keys options.Validator[labels] = options.MapKeys[labels](options.NotBlank[string]())
+	var values options.Validator[labels] = options.MapValues[labels](options.Positive[int]())
 
-	if sliceValidator == nil || mapValidator == nil {
+	if sliceValidator == nil || mapValidator == nil || each == nil || keys == nil || values == nil {
 		t.Fatal("expected collection validators")
 	}
+
+	type name string
+	type count int
+	type definedNames []name
+	type definedLimits map[name]count
+	var _ options.Validator[definedNames] = options.SliceEach[definedNames](options.NotBlank[name]())
+	var _ options.Validator[definedLimits] = options.MapKeys[definedLimits](options.NotBlank[name]())
+	var _ options.Validator[definedLimits] = options.MapValues[definedLimits](options.Positive[count]())
 }
 
 func TestPredicateHelperTypeInference(t *testing.T) {

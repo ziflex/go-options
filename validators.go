@@ -290,6 +290,38 @@ func SliceMaxLen[S ~[]E, E any](maximum int) Validator[S] {
 	}
 }
 
+// SliceEach runs every non-nil validator against every element, in ascending
+// index order and validator registration order. It copies the validator list;
+// nil and empty slices and zero or all-nil validators pass. Failures are joined
+// under relative [index] labels, preserving each child error and its value
+// details. Collection wrappers omit their own values. Traversal is read-only;
+// child validators must also treat their inputs as read-only.
+func SliceEach[S ~[]E, E any](validators ...Validator[E]) Validator[S] {
+	validators = append([]Validator[E](nil), validators...)
+
+	return func(value S) error {
+		var failures []error
+
+		for index, element := range value {
+			for _, validator := range validators {
+				if validator == nil {
+					continue
+				}
+
+				if err := validator(element); err != nil {
+					failures = append(failures, ValidationError{
+						Field:     fmt.Sprintf("[%d]", index),
+						OmitValue: true,
+						Reason:    err,
+					})
+				}
+			}
+		}
+
+		return joinCollectionFailures(failures)
+	}
+}
+
 // MapNotEmpty rejects nil and empty maps.
 func MapNotEmpty[M ~map[K]V, K comparable, V any]() Validator[M] {
 	return func(value M) error {
@@ -309,6 +341,94 @@ func MapMaxLen[M ~map[K]V, K comparable, V any](maximum int) Validator[M] {
 	return func(value M) error {
 		return validateMaxLength(len(value), maximum)
 	}
+}
+
+// MapKeys runs every non-nil validator against every key, preserving validator
+// registration order within each entry. Entry execution and error order are
+// unspecified. It copies the validator list; nil and empty maps and zero or
+// all-nil validators pass. Failures are joined under key[%#v] labels, using
+// Go-syntax-style key formatting (quoted and escaped for ordinary strings) only
+// for failing entries. Labels are diagnostic text, not machine-readable paths.
+// Child errors and their value details are preserved; collection wrappers omit
+// their own values. Traversal and child validators must be read-only.
+func MapKeys[M ~map[K]V, K comparable, V any](validators ...Validator[K]) Validator[M] {
+	validators = append([]Validator[K](nil), validators...)
+
+	return func(value M) error {
+		var failures []error
+
+		for key := range value {
+			var location string
+
+			for _, validator := range validators {
+				if validator == nil {
+					continue
+				}
+
+				if err := validator(key); err != nil {
+					if location == "" {
+						location = fmt.Sprintf("key[%#v]", key)
+					}
+
+					failures = append(failures, ValidationError{
+						Field:     location,
+						OmitValue: true,
+						Reason:    err,
+					})
+				}
+			}
+		}
+
+		return joinCollectionFailures(failures)
+	}
+}
+
+// MapValues runs every non-nil validator against every value, preserving
+// validator registration order within each entry. Entry execution and error
+// order are unspecified. It copies the validator list; nil and empty maps and
+// zero or all-nil validators pass. Failures are joined under [%#v] key labels,
+// using Go-syntax-style formatting (quoted and escaped for ordinary strings)
+// only for failing entries. Labels are diagnostic text, not machine-readable
+// paths. Child errors and their value details are preserved; collection wrappers
+// omit their own values. Traversal and child validators must be read-only.
+func MapValues[M ~map[K]V, K comparable, V any](validators ...Validator[V]) Validator[M] {
+	validators = append([]Validator[V](nil), validators...)
+
+	return func(value M) error {
+		var failures []error
+
+		for key, element := range value {
+			var location string
+
+			for _, validator := range validators {
+				if validator == nil {
+					continue
+				}
+
+				if err := validator(element); err != nil {
+					if location == "" {
+						location = fmt.Sprintf("[%#v]", key)
+					}
+
+					failures = append(failures, ValidationError{
+						Field:     location,
+						OmitValue: true,
+						Reason:    err,
+					})
+				}
+			}
+		}
+
+		return joinCollectionFailures(failures)
+	}
+}
+
+func joinCollectionFailures(failures []error) error {
+	if err := errors.Join(failures...); err != nil {
+		return ValidationError{OmitValue: true, Reason: err}
+	}
+
+	return nil
 }
 
 func validateNotEmptyLength(length int) error {

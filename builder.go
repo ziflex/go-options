@@ -101,7 +101,9 @@ func (b Builder[C, V]) Build() Option[C] {
 			}
 
 			if err := validator(value); err != nil {
-				errs = append(errs, ToValidationError(name, fmt.Sprint(value), err))
+				errs = append(errs, normalizeValidationError(name, func() string {
+					return fmt.Sprint(value)
+				}, err))
 			}
 		}
 

@@ -191,3 +191,63 @@ func ExampleApplyTo() {
 	// Output:
 	// 30s 4 <nil>
 }
+
+func ExampleSliceEach() {
+	type names []string
+	type config struct{ names names }
+
+	option := options.New(func(cfg *config, value names) {
+		cfg.names = value
+	}).Value(names{"Ada", " "}).Named("names").Validators(
+		options.SliceMinLen[names](1),
+		options.SliceEach[names](options.NotBlank[string](), options.MaxLen[string](10)),
+	).Build()
+
+	got, err := options.Apply(option)
+	fmt.Println(len(got.names), err)
+
+	// Output:
+	// 0 names: [1]: must not be blank: value=" "
+}
+
+type exampleInterceptor func()
+
+func ExampleSliceEach_interceptors() {
+	type config struct{ interceptors []exampleInterceptor }
+	withInterceptors := func(interceptors ...exampleInterceptor) options.Option[config] {
+		captured := append([]exampleInterceptor(nil), interceptors...)
+		return options.New(func(cfg *config, value []exampleInterceptor) {
+			cfg.interceptors = append(cfg.interceptors, value...)
+		}).Value(captured).Named("unary interceptors").Validators(
+			options.SliceEach[[]exampleInterceptor](options.NotNil[exampleInterceptor]()),
+		).Build()
+	}
+
+	calls := 0
+	interceptor := exampleInterceptor(func() { calls++ })
+	got, err := options.Apply(withInterceptors(interceptor, interceptor, nil))
+	fmt.Println(err)
+	fmt.Println(len(got.interceptors), calls)
+
+	// Output:
+	// unary interceptors: [2]: must not be nil: value=<nil>
+	// 0 0
+}
+
+func ExampleMapKeys() {
+	type limits map[string]int
+	validate := options.MapKeys[limits](options.NotBlank[string]())
+	fmt.Println(validate(limits{"": 1, "timeout": 2}))
+
+	// Output:
+	// key[""]: must not be blank: value=""
+}
+
+func ExampleMapValues() {
+	type limits map[string]int
+	validate := options.MapValues[limits](options.Positive[int]())
+	fmt.Println(validate(limits{"timeout": -1, "workers": 2}))
+
+	// Output:
+	// ["timeout"]: must be positive: value=-1
+}
