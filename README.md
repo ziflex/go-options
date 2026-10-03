@@ -206,8 +206,11 @@ A custom option with independent failures can return
 Validators do not require a field name. `Named` identifies the option being
 configured. When a validator directly returns a fieldless `ValidationError`,
 `Build` copies it, adds the option name, and fills a missing value from the
-bound option value. Ordinary errors, validation errors that already identify a
-field, and wrapped or joined failures retain their existing wrapper behavior:
+bound option value unless `OmitValue` is true. Pointer errors are copied without
+mutating the original. An explicit value is preserved, and the builder formats
+the option value only when a fallback is needed. Ordinary errors, validation
+errors that already identify a field, and wrapped or joined failures retain
+their existing wrapper behavior:
 
 ```go
 func WithNamedWorkers(workers int) options.Option[Config] {
@@ -220,6 +223,23 @@ func WithNamedWorkers(workers int) options.Option[Config] {
 		Build()
 }
 ```
+
+Set `OmitValue: true` on a directly returned `ValidationError` or non-nil
+`*ValidationError` to suppress that node's value rendering and automatic fallback
+population, even when its `Value` is non-empty. If the error already has a field,
+the builder adds an outer option wrapper and propagates omission to it.
+`ToValidationError` follows the same normalization rules with its supplied
+fallback string.
+
+Omission applies only to the direct error. The builder does not search `%w`
+wrappers or `errors.Join` results for it. A custom validator that requires
+omission at the builder boundary must return a top-level validation error with
+`OmitValue: true`. This is not a general-purpose redaction facility: child reason
+strings, map-key labels, and values supplied by child validators remain visible.
+
+Adding `OmitValue` preserves zero-value behavior and keyed literals, but the new
+exported struct field can break consumers using unkeyed `ValidationError`
+composite literals.
 
 ### Custom validation
 
@@ -282,9 +302,12 @@ return errors.Join(
 | `SliceNotEmpty[S]()` | Slices | Rejects nil and empty slices. |
 | `SliceMinLen[S](minimum)` | Slices | Accepts slices with at least `minimum` elements; nil slices have length zero. |
 | `SliceMaxLen[S](maximum)` | Slices | Accepts slices with at most `maximum` elements; nil slices have length zero. |
+| `SliceEach[S](validators...)` | Slice elements | Runs every non-nil validator against every element and joins located failures. |
 | `MapNotEmpty[M]()` | Maps | Rejects nil and empty maps. |
 | `MapMinLen[M](minimum)` | Maps | Accepts maps with at least `minimum` entries; nil maps have length zero. |
 | `MapMaxLen[M](maximum)` | Maps | Accepts maps with at most `maximum` entries; nil maps have length zero. |
+| `MapKeys[M](validators...)` | Map keys | Runs every non-nil validator against every key and joins located failures. |
+| `MapValues[M](validators...)` | Map values | Runs every non-nil validator against every value and joins located failures. |
 | `OneOf[V](allowed...)` | Comparable values | Accepts values in the allowed set; an empty set rejects every value. |
 | `NotOneOf[V](disallowed...)` | Comparable values | Accepts values outside the disallowed set; an empty set accepts every value. |
 
@@ -299,6 +322,80 @@ var NamesRequired = options.SliceNotEmpty[Names]()
 var NamesLimited = options.SliceMaxLen[Names](10)
 var LabelsRequired = options.MapNotEmpty[Labels]()
 var LabelsLimited = options.MapMaxLen[Labels](10)
+```
+
+### Collection validation
+
+Compose existing validators for elements, keys, and values. Supplying only the
+collection type argument also works for defined collections and element types:
+
+```go
+type Names []string
+type Limits map[string]int
+type NamesConfig struct{ Names Names }
+
+var NamesValid = options.SliceEach[Names](
+	options.NotBlank[string](),
+	options.MaxLen[string](32),
+)
+var KeysValid = options.MapKeys[Limits](options.NotBlank[string]())
+var ValuesValid = options.MapValues[Limits](options.Positive[int]())
+
+func WithNames(names Names) options.Option[NamesConfig] {
+	captured := append(Names(nil), names...)
+	return options.New(func(config *NamesConfig, value Names) {
+		config.Names = append(config.Names, value...)
+	}).Value(captured).Named("names").Validators(
+		options.SliceNotEmpty[Names](),
+		NamesValid,
+	).Build()
+}
+```
+
+Nil and empty collections pass `SliceEach`, `MapKeys`, and `MapValues`. Compose
+`NotNil` or a collection-length validator when presence or length is required.
+Zero or all-nil validator lists are no-ops; individual nil validators are ignored.
+Each combinator copies its validator list at construction, so later edits to the
+supplied list do not change it. Traversal is read-only and does not deep-copy
+inputs; child validators must also treat their values as read-only. The option
+implementation owns any copying and appending.
+
+Every validator runs against every entry, including after earlier failures.
+Failures are collected with `errors.Join`. Slices execute in ascending index
+order, with validators in registration order for each element. Maps preserve
+validator registration order within an entry; entry execution and error ordering
+are unspecified.
+
+Each child error is preserved as the reason of a relative location wrapper:
+
+| Location | Example label |
+| --- | --- |
+| Slice element | `[2]` |
+| Map value | `["timeout"]` |
+| Map key | `key["timeout"]` |
+
+Map labels use `%#v` for Go-syntax-style key formatting, including quoting and
+escaping ordinary strings. All comparable key types are supported. These are
+diagnostic labels, not machine-readable paths, and only failing entries' keys
+are formatted.
+
+Collection location wrappers and their fieldless aggregate set `OmitValue: true`.
+The builder adds the option name to the aggregate without formatting the entire
+collection. Combinators never invent fallback element values; child validators
+own their value details. A plain error produces `ports: [1]: reserved port`, while
+`NotNil` on a function element produces
+`unary interceptors: [2]: must not be nil: value=<nil>` without invoking the
+function. Setters run only when all option validators pass.
+
+Nested combinators preserve ordinary wrapping and cause discovery through
+`errors.Is` and `errors.As`:
+
+```go
+var MatrixValid = options.SliceEach[[][]int](
+	options.SliceEach[[]int](options.Positive[int]()),
+)
+// With Named("matrix"), a failure can read:
+// matrix: [1]: [2]: must be positive: value=-3
 ```
 
 ### Applying to an existing configuration

@@ -974,6 +974,7 @@ func TestBuilder(t *testing.T) {
 func sameValidationError(got, want ValidationError) bool {
 	return got.Field == want.Field &&
 		got.Value == want.Value &&
+		got.OmitValue == want.OmitValue &&
 		errorMessage(got.Reason) == errorMessage(want.Reason)
 }
 
